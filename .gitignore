@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Credentials & Private Settings (CRITICAL: DO NOT COMMIT REAL KEYS)
+credentials.json
+USER_CREDENTIALS.json
+.env
+*.pem
+*.key
+
+# Logs & Runtime output
+logs/
+*.log
+
+# Caches & Instrument masters
+data/
+*.cache
+OpenAPIScripMaster.json
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
