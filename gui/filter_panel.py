@@ -29,6 +29,7 @@ class StockFilterItem(QtWidgets.QWidget):
         self.symbol = symbol
         self.color_hex = color_hex
         self.pct_change: float = 0.0
+        self.ltp: float = 0.0
         self.initial_index: int = 0
 
         layout = QtWidgets.QHBoxLayout(self)
@@ -65,9 +66,16 @@ class StockFilterItem(QtWidgets.QWidget):
 
         layout.addStretch()
 
+        # Live LTP Badge
+        self.lbl_ltp = QtWidgets.QLabel("₹ 0.00")
+        self.lbl_ltp.setStyleSheet("color: #94A3B8; font-size: 10px; font-family: monospace; font-weight: 500;")
+        layout.addWidget(self.lbl_ltp)
+
         # % Change Badge
         self.lbl_pct = QtWidgets.QLabel("0.00%")
-        self.lbl_pct.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 10px; font-weight: bold;")
+        self.lbl_pct.setFixedWidth(54)
+        self.lbl_pct.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.lbl_pct.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 10px; font-weight: bold; font-family: monospace;")
         layout.addWidget(self.lbl_pct)
 
         # Remove 'X' Button
@@ -92,12 +100,16 @@ class StockFilterItem(QtWidgets.QWidget):
 
     def update_pct(self, pct: float, ltp: float = 0.0, prev_close: float = 0.0) -> None:
         self.pct_change = pct
+        self.ltp = ltp
         sign = "+" if pct >= 0 else ""
         color = "#10B981" if pct >= 0 else "#EF4444"
+        display_px = ltp if ltp > 0 else prev_close
+        if display_px > 0:
+            self.lbl_ltp.setText(f"₹ {display_px:,.2f}")
         self.lbl_pct.setText(f"{sign}{pct:.2f}%")
-        self.lbl_pct.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
-        if ltp > 0:
-            self.setToolTip(f"{self.symbol}\nLTP: Rs. {ltp:,.2f}\nPrev Close: Rs. {prev_close:,.2f}\nChange: {sign}{pct:.2f}%")
+        self.lbl_pct.setStyleSheet(f"color: {color}; font-size: 10px; font-weight: bold; font-family: monospace;")
+        if display_px > 0:
+            self.setToolTip(f"{self.symbol}\nLTP: ₹ {display_px:,.2f}\nPrev Close: ₹ {prev_close:,.2f}\nChange: {sign}{pct:.2f}%")
 
     def set_surge(self, velocity: Optional[float], window_min: int = 2) -> None:
         """Displays or hides real-time momentum velocity indicator tag."""
@@ -172,6 +184,8 @@ class FilterPanel(QtWidgets.QWidget):
             "Z -> A (Reverse)",
             "% Change (High -> Low)",
             "% Change (Low -> High)",
+            "LTP (High -> Low)",
+            "LTP (Low -> High)",
         ])
         self.combo_sort.setStyleSheet(f"""
             QComboBox {{
@@ -360,9 +374,15 @@ class FilterPanel(QtWidgets.QWidget):
         elif "Z -> A" in mode or "Z → A" in mode:
             items_list.sort(key=lambda x: x.symbol.upper(), reverse=True)
         elif "High -> Low" in mode or "High → Low" in mode:
-            items_list.sort(key=lambda x: x.pct_change, reverse=True)
+            if "LTP" in mode:
+                items_list.sort(key=lambda x: x.ltp, reverse=True)
+            else:
+                items_list.sort(key=lambda x: x.pct_change, reverse=True)
         elif "Low -> High" in mode or "Low → High" in mode:
-            items_list.sort(key=lambda x: x.pct_change, reverse=False)
+            if "LTP" in mode:
+                items_list.sort(key=lambda x: x.ltp, reverse=False)
+            else:
+                items_list.sort(key=lambda x: x.pct_change, reverse=False)
         else:
             items_list.sort(key=lambda x: getattr(x, "initial_index", 0))
 
