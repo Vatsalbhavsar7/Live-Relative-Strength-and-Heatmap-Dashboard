@@ -485,6 +485,36 @@ class RelativeStrengthChart(QtWidgets.QWidget):
                 s["curve"].setPen(pg.mkPen(color=c, width=1.0))
                 s["curve"].setZValue(1)
 
+    def hover_stock(self, target_token: str) -> None:
+        """Emphasizes the hovered stock line from watchlist hover (thick bold line) while dimming others."""
+        if target_token not in self.stock_series:
+            return
+
+        for tok, s in self.stock_series.items():
+            if not s["visible"]:
+                continue
+            if tok == target_token:
+                s["curve"].setPen(pg.mkPen(color=s["color"], width=3.8))
+                s["curve"].setZValue(120)
+            else:
+                c = QtGui.QColor(s["color"])
+                c.setAlpha(45)
+                s["curve"].setPen(pg.mkPen(color=c, width=1.0))
+                s["curve"].setZValue(1)
+
+    def unhover_stock(self, target_token: str) -> None:
+        """Restores line widths and opacities when mouse leaves the watchlist item."""
+        if self.highlighted_token:
+            self.highlight_stock(self.highlighted_token)
+        else:
+            for tok, s in self.stock_series.items():
+                if s["visible"]:
+                    is_surging = tok in self.surging_tokens and self.chk_surge_radar.isChecked()
+                    w = 3.5 if is_surging else 1.5
+                    z = 90 if is_surging else 5
+                    s["curve"].setPen(pg.mkPen(color=s["color"], width=w))
+                    s["curve"].setZValue(z)
+
     def clear_highlight(self) -> None:
         """Restores all visible lines to their standard width and normal opacity."""
         self.highlighted_token = None

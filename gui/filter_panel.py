@@ -22,6 +22,8 @@ class StockFilterItem(QtWidgets.QWidget):
 
     visibility_changed = QtCore.Signal(str, bool)  # token, is_visible
     remove_clicked = QtCore.Signal(str)           # token
+    hover_entered = QtCore.Signal(str)            # token
+    hover_left = QtCore.Signal(str)               # token
 
     def __init__(self, token: str, symbol: str, color_hex: str, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
@@ -137,6 +139,18 @@ class StockFilterItem(QtWidgets.QWidget):
         self.chk.blockSignals(False)
         self.visibility_changed.emit(self.token, visible)
 
+    def enterEvent(self, event) -> None:
+        """Emits hover signal and highlights the watchlist row."""
+        self.setStyleSheet("background-color: #1E293B; border-radius: 4px;")
+        self.hover_entered.emit(self.token)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        """Emits unhover signal and clears row highlight."""
+        self.setStyleSheet("")
+        self.hover_left.emit(self.token)
+        super().leaveEvent(event)
+
 
 class FilterPanel(QtWidgets.QWidget):
     """Panel managing all stock checkboxes, quick filters, and removals."""
@@ -144,6 +158,8 @@ class FilterPanel(QtWidgets.QWidget):
     visibility_toggled = QtCore.Signal(str, bool)
     remove_token_requested = QtCore.Signal(str)
     bulk_filter_applied = QtCore.Signal()
+    stock_hover_entered = QtCore.Signal(str)
+    stock_hover_left = QtCore.Signal(str)
 
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
@@ -338,6 +354,8 @@ class FilterPanel(QtWidgets.QWidget):
             self.default_order[token] = self._order_counter
             item.visibility_changed.connect(self.visibility_toggled.emit)
             item.remove_clicked.connect(self.remove_token_requested.emit)
+            item.hover_entered.connect(self.stock_hover_entered.emit)
+            item.hover_left.connect(self.stock_hover_left.emit)
             self.items[token] = item
             self.list_layout.insertWidget(self.list_layout.count() - 1, item)
 
