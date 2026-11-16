@@ -502,7 +502,7 @@ class RelativeStrengthChart(QtWidgets.QWidget):
                 s["curve"].setPen(pg.mkPen(color=c, width=1.0))
                 s["curve"].setZValue(1)
 
-    def unhover_stock(self, target_token: str) -> None:
+    def unhover_stock(self, target_token: str = "") -> None:
         """Restores line widths and opacities when mouse leaves the watchlist item."""
         if self.highlighted_token:
             self.highlight_stock(self.highlighted_token)

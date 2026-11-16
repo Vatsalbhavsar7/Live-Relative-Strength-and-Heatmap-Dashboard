@@ -140,14 +140,12 @@ class StockFilterItem(QtWidgets.QWidget):
         self.visibility_changed.emit(self.token, visible)
 
     def enterEvent(self, event) -> None:
-        """Emits hover signal and highlights the watchlist row."""
-        self.setStyleSheet("background-color: #1E293B; border-radius: 4px;")
+        """Emits hover signal."""
         self.hover_entered.emit(self.token)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        """Emits unhover signal and clears row highlight."""
-        self.setStyleSheet("")
+        """Emits unhover signal."""
         self.hover_left.emit(self.token)
         super().leaveEvent(event)
 
@@ -180,10 +178,34 @@ class FilterPanel(QtWidgets.QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        # Title
+        # Title & Interactive Hover Focus Toggle
+        title_box = QtWidgets.QHBoxLayout()
         lbl_title = QtWidgets.QLabel("WATCHLIST & FILTERS")
         lbl_title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: bold; font-size: 12px;")
-        main_layout.addWidget(lbl_title)
+        title_box.addWidget(lbl_title)
+        title_box.addStretch()
+
+        self.chk_hover_focus = QtWidgets.QCheckBox("Highlight on Hover")
+        self.chk_hover_focus.setChecked(False)  # Deactivated by default (unchecked)
+        self.chk_hover_focus.setToolTip("When checked, hovering over any watchlist stock highlights its chart line in bold")
+        self.chk_hover_focus.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLOR_TEXT_SECONDARY};
+                font-size: 10px;
+                font-weight: 500;
+            }}
+            QCheckBox:hover {{
+                color: #38BDF8;
+            }}
+            QCheckBox::indicator {{
+                width: 12px;
+                height: 12px;
+            }}
+        """)
+        self.chk_hover_focus.toggled.connect(self._on_hover_focus_toggled)
+        title_box.addWidget(self.chk_hover_focus)
+
+        main_layout.addLayout(title_box)
 
         # Sort Controls (A-Z, % Change, Default)
         sort_container = QtWidgets.QHBoxLayout()
@@ -354,12 +376,35 @@ class FilterPanel(QtWidgets.QWidget):
             self.default_order[token] = self._order_counter
             item.visibility_changed.connect(self.visibility_toggled.emit)
             item.remove_clicked.connect(self.remove_token_requested.emit)
-            item.hover_entered.connect(self.stock_hover_entered.emit)
-            item.hover_left.connect(self.stock_hover_left.emit)
+            item.hover_entered.connect(self._on_item_hover_entered)
+            item.hover_left.connect(self._on_item_hover_left)
             self.items[token] = item
             self.list_layout.insertWidget(self.list_layout.count() - 1, item)
 
         self.items[token].update_pct(pct, ltp=ltp, prev_close=prev_close)
+
+    def _on_hover_focus_toggled(self, checked: bool) -> None:
+        """When user turns off the hover feature, immediately clear any active line highlight."""
+        if not checked:
+            for item in self.items.values():
+                item.setStyleSheet("")
+            self.stock_hover_left.emit("")
+
+    def _on_item_hover_entered(self, token: str) -> None:
+        """Only highlights row and emits chart highlight if hover feature is checked."""
+        if self.chk_hover_focus.isChecked():
+            item = self.items.get(token)
+            if item:
+                item.setStyleSheet("background-color: #1E293B; border-radius: 4px;")
+            self.stock_hover_entered.emit(token)
+
+    def _on_item_hover_left(self, token: str) -> None:
+        """Clears row style and restores chart lines."""
+        item = self.items.get(token)
+        if item:
+            item.setStyleSheet("")
+        if self.chk_hover_focus.isChecked():
+            self.stock_hover_left.emit(token)
 
     def remove_stock(self, token: str) -> None:
         """Removes a stock item from the filter list."""
