@@ -100,6 +100,33 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
 
         header_bar.addStretch()
 
+        # Heatmap Engine ON/OFF Checkbox (DEFAULT OFF to save background CPU)
+        self.chk_heatmap_header = QtWidgets.QCheckBox("🔥 Enable Heatmap")
+        self.chk_heatmap_header.setChecked(False)  # DEFAULT OFF
+        self.chk_heatmap_header.setToolTip("Toggle to activate live Heatmap calculations or keep paused to save CPU.")
+        self.chk_heatmap_header.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLOR_TEXT_PRIMARY};
+                font-size: 11px;
+                font-weight: bold;
+                spacing: 6px;
+                margin-right: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid {COLOR_BORDER};
+                background-color: {COLOR_PANEL_DARK};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #10B981;
+                border-color: #10B981;
+            }}
+        """)
+        self.chk_heatmap_header.toggled.connect(self._on_heatmap_toggle)
+        header_bar.addWidget(self.chk_heatmap_header)
+
         # Quick Add Stock Input
         self.inp_quick_add = QtWidgets.QLineEdit()
         self.inp_quick_add.setPlaceholderText("+ Add Stock (e.g. IDEA, SBIN)...")
@@ -209,13 +236,50 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         tab_heatmap_layout.setContentsMargins(8, 8, 8, 8)
         tab_heatmap_layout.setSpacing(8)
 
-        self.heatmap = HeatmapWidget()
+        self.heatmap = HeatmapWidget(default_enabled=False)
         self.heatmap.stock_selected.connect(self._on_heatmap_stock_selected)
+        self.heatmap.engine_toggled.connect(self._on_heatmap_widget_toggled)
         tab_heatmap_layout.addWidget(self.heatmap)
 
         self.tabs.addTab(tab_heatmap_widget, "🔥 Live Heatmap (Market Cap & Equal)")
 
         main_layout.addWidget(self.tabs)
+
+    # ==========================================================================
+    # HEATMAP ENGINE ON/OFF TOGGLE & STATE SYNCHRONIZATION
+    # ==========================================================================
+
+    def _on_heatmap_toggle(self, enabled: bool) -> None:
+        """Triggered when user clicks '🔥 Enable Heatmap' in top header bar."""
+        self.heatmap.set_engine_enabled(enabled)
+        if enabled:
+            self._sync_heatmap_all()
+
+    def _on_heatmap_widget_toggled(self, enabled: bool) -> None:
+        """Triggered when user toggles 'Enable Heatmap Engine' inside Heatmap tab."""
+        if self.chk_heatmap_header.isChecked() != enabled:
+            self.chk_heatmap_header.blockSignals(True)
+            self.chk_heatmap_header.setChecked(enabled)
+            self.chk_heatmap_header.blockSignals(False)
+        if enabled:
+            self._sync_heatmap_all()
+
+    def _sync_heatmap_all(self) -> None:
+        """Hydrates all heatmap tiles with the latest snapshot data across active basket."""
+        for tok, m in self.active_basket.items():
+            sym = m["symbol"]
+            mcap = float(m.get("market_cap_crores", 10000.0))
+            prev_close = float(m.get("prev_close", 100.0))
+
+            series = self.chart.stock_series.get(tok)
+            if series and series.get("pct_series") and len(series["pct_series"]) > 0:
+                pct = series["pct_series"][-1]
+                ltp = series["ltp_series"][-1] if series.get("ltp_series") and len(series["ltp_series"]) > 0 else prev_close
+            else:
+                pct = 0.0
+                ltp = prev_close
+
+            self.heatmap.register_or_update_tile(tok, sym, pct, ltp, mcap, force=True)
 
     # ==========================================================================
     # DATA BOOTSTRAP: 09:15 HISTORICAL REPLAY & BASKET SYNC
@@ -238,7 +302,8 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
             self.chart.register_stock(tok, sym)
             color_hex = self.chart.stock_series[tok]["color"]
             self.filter_panel.add_or_update_stock(tok, sym, color_hex, pct=0.0, ltp=prev_px, prev_close=prev_px)
-            self.heatmap.register_or_update_tile(tok, sym, pct_change=0.0, ltp=prev_px, mcap=mcap)
+            if self.heatmap.is_engine_enabled:
+                self.heatmap.register_or_update_tile(tok, sym, pct_change=0.0, ltp=prev_px, mcap=mcap)
 
         # Load 1-minute historical bars from 09:15 onwards
         bars = self.db.fetch_today_1m_bars()
@@ -275,9 +340,10 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
                 # 1. Update Chart curve
                 self.chart.append_tick(tok, sym, epoch, pct, ltp=ltp)
 
-                # 2. Update Heatmap tile
-                mcap = float(self.active_basket.get(tok, {}).get("market_cap_crores", 10000.0))
-                self.heatmap.register_or_update_tile(tok, sym, pct, ltp, mcap)
+                # 2. Update Heatmap tile (only when enabled by user to save background CPU)
+                if self.heatmap.is_engine_enabled:
+                    mcap = float(self.active_basket.get(tok, {}).get("market_cap_crores", 10000.0))
+                    self.heatmap.register_or_update_tile(tok, sym, pct, ltp, mcap)
 
                 # 3. Update Watchlist badge with double-digit % and live LTP
                 color_hex = self.chart.stock_series.get(tok, {}).get("color", "#38BDF8")
@@ -346,7 +412,8 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         self.chart.register_stock(tok, sym)
         color_hex = self.chart.stock_series[tok]["color"]
         self.filter_panel.add_or_update_stock(tok, sym, color_hex, pct=0.0, ltp=prev_close, prev_close=prev_close)
-        self.heatmap.register_or_update_tile(tok, sym, pct_change=0.0, ltp=prev_close, mcap=mcap)
+        if self.heatmap.is_engine_enabled:
+            self.heatmap.register_or_update_tile(tok, sym, pct_change=0.0, ltp=prev_close, mcap=mcap)
         logger.info(f"UI dynamically integrated newly added stock: {sym} (Token {tok}).")
 
     def _on_remove_stock_requested(self, token: str) -> None:

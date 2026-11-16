@@ -1,7 +1,7 @@
 """
-test_system.py
---------------
-Comprehensive automated test suite verifying all layers of the standalone project:
+projects/06_live_relative_strength_and_heatmap_dashboard/test_system.py
+------------------------------------------------------------------------
+Comprehensive automated test suite verifying all layers of Project 06:
 1. MySQL Connection & Schema auto-initialization.
 2. Default Nifty 50 Basket sync & dynamic token lookup.
 3. Micro-batch tick insertion throughput.
@@ -14,6 +14,10 @@ from datetime import datetime
 import sys
 import time
 
+try:
+    import _bootstrap_path
+except ImportError:
+    pass
 from basket_manager import BasketManager
 from db_manager import DatabaseManager
 
@@ -99,8 +103,12 @@ def run_all_tests():
     chart.register_stock("2885", "RELIANCE-EQ")
     chart.append_tick("2885", "RELIANCE-EQ", time.time(), 0.18)
 
-    heatmap = HeatmapWidget()
+    heatmap = HeatmapWidget(default_enabled=False)
+    assert not heatmap.is_engine_enabled, "Heatmap engine should be default disabled"
+    heatmap.set_engine_enabled(True)
+    assert heatmap.is_engine_enabled, "Heatmap engine should be enabled after set_engine_enabled"
     heatmap.register_or_update_tile("2885", "RELIANCE-EQ", 0.18, 2755.0, 1980000.0)
+    assert "2885" in heatmap.tiles, "Tile should be created when enabled"
 
     filter_panel = FilterPanel()
     filter_panel.add_or_update_stock("2885", "RELIANCE-EQ", "#38BDF8", 0.18)

@@ -1,6 +1,6 @@
 """
-heatmap_widget.py
------------------
+projects/06_live_relative_strength_and_heatmap_dashboard/gui/heatmap_widget.py
+-------------------------------------------------------------------------------
 Interactive Synchronized Heatmap Widget supporting:
 1. Equal-Weighted View (Responsive uniform tiles).
 2. Market-Cap-Weighted View (Squarified Treemap layout).
@@ -90,7 +90,7 @@ class HeatmapTile(QtWidgets.QFrame):
         self.lbl_pct.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(self.lbl_pct)
 
-        self.lbl_ltp = QtWidgets.QLabel("Rs. 0.00")
+        self.lbl_ltp = QtWidgets.QLabel("₹ 0.00")
         self.lbl_ltp.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 9px;")
         self.lbl_ltp.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(self.lbl_ltp)
@@ -103,7 +103,7 @@ class HeatmapTile(QtWidgets.QFrame):
 
         sign = "+" if pct_change >= 0 else ""
         self.lbl_pct.setText(f"{sign}{pct_change:.2f}%")
-        self.lbl_ltp.setText(f"Rs. {ltp:,.2f}")
+        self.lbl_ltp.setText(f"₹ {ltp:,.2f}")
 
         bg_color = get_heatmap_color(pct_change)
         # Choose high-contrast text color
@@ -133,11 +133,13 @@ class HeatmapWidget(QtWidgets.QWidget):
     """Container for the Live Heatmap with Equal-Weighted vs Market-Cap-Weighted toggle."""
 
     stock_selected = QtCore.Signal(str)  # Emits token when clicked
+    engine_toggled = QtCore.Signal(bool)  # Emits True when enabled, False when paused
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, default_enabled: bool = False):
         super().__init__(parent)
         self.mode: str = "EQUAL"  # 'EQUAL' or 'MCAP'
         self.tiles: Dict[str, HeatmapTile] = {}
+        self._engine_enabled: bool = default_enabled
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -148,10 +150,41 @@ class HeatmapWidget(QtWidgets.QWidget):
         # 1. Header Toolbar
         top_bar = QtWidgets.QHBoxLayout()
         top_bar.setContentsMargins(4, 2, 4, 2)
+        top_bar.setSpacing(10)
 
         lbl_title = QtWidgets.QLabel("LIVE HEATMAP")
         lbl_title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: bold; font-size: 12px;")
         top_bar.addWidget(lbl_title)
+
+        # Engine ON/OFF Toggle Checkbox (DEFAULT OFF to save background CPU)
+        self.chk_enable = QtWidgets.QCheckBox("Enable Heatmap Engine")
+        self.chk_enable.setChecked(self._engine_enabled)
+        self.chk_enable.setToolTip("Toggle to activate/pause live heatmap calculations and save CPU.")
+        self.chk_enable.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLOR_TEXT_PRIMARY};
+                font-size: 11px;
+                font-weight: bold;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid {COLOR_BORDER};
+                background-color: {COLOR_PANEL_DARK};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #10B981;
+                border-color: #10B981;
+            }}
+        """)
+        self.chk_enable.toggled.connect(self._on_chk_enable_toggled)
+        top_bar.addWidget(self.chk_enable)
+
+        # Status Badge (Live vs Paused)
+        self.lbl_status = QtWidgets.QLabel()
+        top_bar.addWidget(self.lbl_status)
 
         top_bar.addStretch()
 
@@ -182,7 +215,51 @@ class HeatmapWidget(QtWidgets.QWidget):
 
         main_layout.addLayout(top_bar)
 
-        # 2. Scrollable Container for Heatmap Tiles
+        # 2. Pause Notice Banner (Shown when Heatmap Engine is disabled to save CPU)
+        self.banner_paused = QtWidgets.QFrame()
+        self.banner_paused.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_PANEL_DARK};
+                border: 1px dashed #4B5563;
+                border-radius: 6px;
+                padding: 10px 14px;
+            }}
+        """)
+        banner_layout = QtWidgets.QHBoxLayout(self.banner_paused)
+        banner_layout.setContentsMargins(10, 8, 10, 8)
+        banner_layout.setSpacing(12)
+
+        lbl_icon = QtWidgets.QLabel("⏸️")
+        lbl_icon.setStyleSheet("font-size: 18px;")
+        banner_layout.addWidget(lbl_icon)
+
+        lbl_desc = QtWidgets.QLabel(
+            "<b>Heatmap Engine is Paused (Default OFF to save background CPU)</b><br>"
+            "<span style='color: #9CA3AF; font-size: 11px;'>Real-time tile updates and layout recalculations are suspended. Check 'Enable Heatmap Engine' to start live updates.</span>"
+        )
+        lbl_desc.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-size: 11px;")
+        banner_layout.addWidget(lbl_desc, stretch=1)
+
+        self.btn_banner_enable = QtWidgets.QPushButton("⚡ Enable Heatmap Engine")
+        self.btn_banner_enable.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: #FFFFFF;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        self.btn_banner_enable.clicked.connect(lambda: self.set_engine_enabled(True))
+        banner_layout.addWidget(self.btn_banner_enable)
+
+        main_layout.addWidget(self.banner_paused)
+
+        # 3. Scrollable Container for Heatmap Tiles
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet(f"""
@@ -202,6 +279,45 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.scroll_area.setWidget(self.container)
         main_layout.addWidget(self.scroll_area)
 
+        # Initialize status indicators
+        self._update_status_ui(self._engine_enabled)
+
+    # ==========================================================================
+    # ENGINE STATE & CONTROL
+    # ==========================================================================
+
+    @property
+    def is_engine_enabled(self) -> bool:
+        """Returns True if heatmap calculations are currently running."""
+        return self._engine_enabled
+
+    def set_engine_enabled(self, enabled: bool) -> None:
+        """Programmatically enable or disable the heatmap engine."""
+        if self._engine_enabled == enabled and self.chk_enable.isChecked() == enabled:
+            return
+        self._engine_enabled = enabled
+        if self.chk_enable.isChecked() != enabled:
+            self.chk_enable.blockSignals(True)
+            self.chk_enable.setChecked(enabled)
+            self.chk_enable.blockSignals(False)
+        self._update_status_ui(enabled)
+        self.engine_toggled.emit(enabled)
+
+    def _on_chk_enable_toggled(self, checked: bool) -> None:
+        self._engine_enabled = checked
+        self._update_status_ui(checked)
+        self.engine_toggled.emit(checked)
+
+    def _update_status_ui(self, enabled: bool) -> None:
+        if enabled:
+            self.lbl_status.setText("● LIVE STREAMING")
+            self.lbl_status.setStyleSheet("background-color: #064E3B; color: #34D399; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 10px;")
+            self.banner_paused.hide()
+        else:
+            self.lbl_status.setText("⏸️ PAUSED (SAVING CPU)")
+            self.lbl_status.setStyleSheet("background-color: #374151; color: #9CA3AF; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 10px;")
+            self.banner_paused.show()
+
     def _on_mode_changed(self, index: int) -> None:
         self.mode = "EQUAL" if index == 0 else "MCAP"
         self.re_layout_tiles()
@@ -217,8 +333,12 @@ class HeatmapWidget(QtWidgets.QWidget):
         pct_change: float,
         ltp: float,
         mcap: float = 10000.0,
+        force: bool = False,
     ) -> None:
         """Adds new tile or updates existing tile in the heatmap."""
+        if not self._engine_enabled and not force:
+            return
+
         if token not in self.tiles:
             tile = HeatmapTile(token=token, symbol=symbol, parent=self.container)
             tile.clicked.connect(self._on_tile_clicked)
@@ -244,8 +364,10 @@ class HeatmapWidget(QtWidgets.QWidget):
 
     def re_layout_tiles(self) -> None:
         """Arranges tiles in the grid based on the active mode."""
+        # Clear existing layout items
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
+            # Do not delete widget, just unparent from layout
 
         if not self.tiles:
             return
@@ -257,6 +379,7 @@ class HeatmapWidget(QtWidgets.QWidget):
         )
 
         if self.mode == "EQUAL":
+            # Equal-Weighted: Uniform grid (5 columns)
             cols = 5
             for idx, tile in enumerate(sorted_tiles):
                 r = idx // cols
@@ -265,15 +388,19 @@ class HeatmapWidget(QtWidgets.QWidget):
                 self.grid_layout.addWidget(tile, r, c, 1, 1)
 
         else:
+            # Market-Cap-Weighted: Top tier gets larger blocks (2x2 or 2x1)
+            # Mega-caps (> 10 Lakh Cr) get 2x2 spans; Mid/Large get 1x2 or 1x1
             r = 0
             c = 0
             max_cols = 6
 
             for idx, tile in enumerate(sorted_tiles):
+                # Mega Caps (> 8 Lakh Cr): Reliance, TCS, HDFC Bank, etc.
                 if tile.mcap >= 800000.0 and c + 2 <= max_cols:
                     tile.setMinimumSize(140, 100)
                     self.grid_layout.addWidget(tile, r, c, 2, 2)
                     c += 2
+                # Large Caps (> 3 Lakh Cr)
                 elif tile.mcap >= 300000.0 and c + 2 <= max_cols:
                     tile.setMinimumSize(120, 65)
                     self.grid_layout.addWidget(tile, r, c, 1, 2)
