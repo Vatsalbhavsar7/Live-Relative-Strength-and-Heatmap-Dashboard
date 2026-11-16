@@ -31,7 +31,10 @@ from gui.filter_panel import FilterPanel
 from gui.heatmap_widget import HeatmapWidget
 from gui.multi_line_chart import RelativeStrengthChart
 from gui.token_manager_dialog import TokenManagerDialog
-from core.logger import get_logger
+try:
+    from core.logger import get_logger
+except ImportError:
+    from utils.logger import get_logger
 
 logger = get_logger("relative_strength.gui")
 
