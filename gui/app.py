@@ -311,14 +311,16 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
 
         # Load 1-minute historical bars (today or multi-day based on initial checkbox state)
         if self.chart.chk_multiday.isChecked():
+            dates = self.db.fetch_distinct_trading_dates(limit=DAYS_TO_KEEP)
             bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
-            logger.info(f"Bootstrapping multi-day continuation bars ({DAYS_TO_KEEP} days) for {len(bars)} tokens.")
+            logger.info(f"Bootstrapping multi-day continuation bars ({len(dates)} days) for {len(bars)} tokens.")
         else:
+            dates = [datetime.now().strftime("%Y-%m-%d")]
             bars = self.db.fetch_today_1m_bars()
             logger.info(f"Bootstrapping today's historical 1m bars for {len(bars)} tokens.")
 
         if bars:
-            self.chart.load_historical_bars(bars)
+            self.chart.load_historical_bars(bars, trading_dates=dates)
 
         self._evaluate_radar_surges()
         self.last_poll_time = datetime.now() - timedelta(seconds=2)
@@ -328,15 +330,17 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         logger.info(f"Multi-day view toggled: {is_multiday} (retention: {DAYS_TO_KEEP} days)")
         self.chart.reset_chart_series()
         if is_multiday:
+            dates = self.db.fetch_distinct_trading_dates(limit=DAYS_TO_KEEP)
             bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
-            mode_lbl = f"past {DAYS_TO_KEEP} days continuation"
+            mode_lbl = f"past {len(dates)} days continuation"
         else:
+            dates = [datetime.now().strftime("%Y-%m-%d")]
             bars = self.db.fetch_today_1m_bars()
             mode_lbl = "today's intraday"
 
         if bars:
             logger.info(f"Loaded {mode_lbl} 1m bars for {len(bars)} tokens.")
-            self.chart.load_historical_bars(bars)
+            self.chart.load_historical_bars(bars, trading_dates=dates)
 
             # Replay any granular ticks logged since the newest bar time up to now
             try:
@@ -352,8 +356,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
                         t_pct = round(float(t["pct_change"]), 2)
                         t_ltp = round(float(t["ltp"]), 2)
                         t_time = t["tick_time"]
-                        epoch = t_time.timestamp() if isinstance(t_time, datetime) else datetime.fromisoformat(str(t_time)).timestamp()
-                        self.chart.append_tick(t_tok, t_sym, epoch, t_pct, ltp=t_ltp)
+                        self.chart.append_tick(t_tok, t_sym, t_time, t_pct, ltp=t_ltp)
             except Exception as replay_err:
                 logger.warning(f"Error replaying post-bar ticks during multi-day reload: {replay_err}")
 
@@ -378,13 +381,12 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
                 pct = round(float(t["pct_change"]), 2)
                 ltp = round(float(t["ltp"]), 2)
                 t_time = t["tick_time"]
-                epoch = t_time.timestamp() if isinstance(t_time, datetime) else datetime.fromisoformat(str(t_time)).timestamp()
 
                 if t_time > max_tick_time:
                     max_tick_time = t_time
 
-                # 1. Update Chart curve
-                self.chart.append_tick(tok, sym, epoch, pct, ltp=ltp)
+                # 1. Update Chart curve (continuous market session coordinate)
+                self.chart.append_tick(tok, sym, t_time, pct, ltp=ltp)
 
                 # 2. Update Heatmap tile (only when enabled by user to save background CPU)
                 if self.heatmap.is_engine_enabled:

@@ -10,7 +10,7 @@ High-performance OpenGL-accelerated Multi-Line Relative Strength Chart.
 - ⚡ Surge Radar: Real-time momentum velocity detection, automatic line-thickening & alert chips.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
@@ -35,36 +35,94 @@ from config import (
 # Enable OpenGL acceleration and anti-aliasing in PyQtGraph
 pg.setConfigOptions(useOpenGL=True, antialias=True)
 
+# 09:15:00 to 15:30:00 = 6 hours 15 minutes = 375 minutes = 22,500 trading seconds per session
+SESSION_TRADING_SECONDS = 22500.0
+
 
 class TimeAxisItem(pg.AxisItem):
-    """Custom PyQtGraph Axis displaying timestamps formatted dynamically (intraday vs multi-day)."""
+    """Custom PyQtGraph Axis displaying continuous market hours (09:15-15:30) with zero overnight gaps."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.multiday_mode: bool = False
+        self.trading_dates: List[str] = [datetime.now().strftime("%Y-%m-%d")]
+
+    def set_trading_dates(self, dates: List[str], multiday_mode: bool = False) -> None:
+        self.trading_dates = list(dates) if dates else [datetime.now().strftime("%Y-%m-%d")]
+        self.multiday_mode = multiday_mode
+        self.picture = None
+        self.update()
+
+    def tickValues(self, minVal, maxVal, size):
+        span = maxVal - minVal
+        if span <= 0 or not self.trading_dates:
+            return super().tickValues(minVal, maxVal, size)
+
+        start_day = max(0, int(minVal // SESSION_TRADING_SECONDS))
+        end_day = min(len(self.trading_dates) - 1, int(maxVal // SESSION_TRADING_SECONDS) + 1)
+
+        major = []
+        minor = []
+
+        # Standard intraday offsets from 09:15 (seconds):
+        # 09:15=0, 10:00=2700, 11:00=6300, 12:00=9900, 13:00=13500, 14:00=17100, 15:00=20700, 15:30=22500
+        hour_offsets = [0, 2700, 6300, 9900, 13500, 17100, 20700, 22500]
+
+        for d in range(start_day, end_day + 1):
+            day_base = d * SESSION_TRADING_SECONDS
+            if span > 45000:
+                # 3-5 day view: major at day open (09:15), minor at midday (12:00)
+                if minVal <= day_base <= maxVal:
+                    major.append(day_base)
+                if minVal <= day_base + 9900 <= maxVal:
+                    minor.append(day_base + 9900)
+            elif span > 15000:
+                # 1-2 day view: major at day open (09:15), minor at 11:00 and 13:30
+                if minVal <= day_base <= maxVal:
+                    major.append(day_base)
+                for off in [6300, 15300]:
+                    pt = day_base + off
+                    if minVal <= pt <= maxVal:
+                        minor.append(pt)
+            else:
+                # Zoomed view: major at round hours
+                for off in hour_offsets:
+                    pt = day_base + off
+                    if minVal <= pt <= maxVal:
+                        major.append(pt)
+
+        res = []
+        if major:
+            res.append((SESSION_TRADING_SECONDS if span > 15000 else 3600.0, major))
+        if minor:
+            res.append((3600.0, minor))
+        return res if res else super().tickValues(minVal, maxVal, size)
 
     def tickStrings(self, values, scale, spacing):
         strings = []
-        valid_dates = []
         for val in values:
             try:
-                dt = datetime.fromtimestamp(val)
-                valid_dates.append(dt)
-            except Exception:
-                pass
+                day_idx = int(round(val) // SESSION_TRADING_SECONDS)
+                sec_offset = int(round(val)) % int(SESSION_TRADING_SECONDS)
 
-        span_days = self.multiday_mode
-        if not span_days and len(valid_dates) >= 2:
-            if (max(valid_dates).date() - min(valid_dates).date()).days > 0:
-                span_days = True
+                if day_idx < 0:
+                    day_idx = 0
+                    sec_offset = 0
+                elif day_idx >= len(self.trading_dates):
+                    day_idx = len(self.trading_dates) - 1
+                    sec_offset = int(SESSION_TRADING_SECONDS)
 
-        for val in values:
-            try:
-                dt = datetime.fromtimestamp(val)
-                if span_days:
-                    strings.append(dt.strftime("%d %b %H:%M"))
+                d_str = self.trading_dates[day_idx]
+                base_dt = datetime.strptime(d_str, "%Y-%m-%d").replace(hour=9, minute=15, second=0)
+                tick_dt = base_dt + timedelta(seconds=sec_offset)
+
+                if self.multiday_mode:
+                    if sec_offset == 0:
+                        strings.append(tick_dt.strftime("%d %b 09:15"))
+                    else:
+                        strings.append(tick_dt.strftime("%d %b %H:%M"))
                 else:
-                    strings.append(dt.strftime("%H:%M:%S"))
+                    strings.append(tick_dt.strftime("%H:%M"))
             except Exception:
                 strings.append("")
         return strings
@@ -84,6 +142,12 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         self.highlighted_token: Optional[str] = None
         self.surging_tokens: Dict[str, float] = {}  # token -> velocity
         self.active_timeframe_minutes: int = 0     # 0 = Live (Raw Ticks)
+
+        # Multi-day session coordinates tracking (09:15 to 15:30 continuous)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        self.trading_dates: List[str] = [today_str]
+        self.date_map: Dict[str, int] = {today_str: 0}
+        self.day_separator_lines: List[pg.InfiniteLine] = []
 
         self._init_ui()
 
@@ -410,6 +474,79 @@ class RelativeStrengthChart(QtWidgets.QWidget):
 
         self.auto_fit_view()
 
+    def set_trading_dates(self, dates: List[str], multiday_mode: bool = False) -> None:
+        """Sets the active trading dates and updates coordinate maps and day boundary separators."""
+        self.trading_dates = list(dates) if dates else [datetime.now().strftime("%Y-%m-%d")]
+        self.date_map = {d: idx for idx, d in enumerate(self.trading_dates)}
+        self.time_axis.set_trading_dates(self.trading_dates, multiday_mode)
+
+        # Clear old day separator lines
+        for line in self.day_separator_lines:
+            try:
+                self.plot_widget.removeItem(line)
+            except Exception:
+                pass
+        self.day_separator_lines.clear()
+
+        # Add vertical dashed separator lines at market transitions between days
+        if multiday_mode and len(self.trading_dates) > 1:
+            for d in range(1, len(self.trading_dates)):
+                line = pg.InfiniteLine(
+                    pos=d * SESSION_TRADING_SECONDS,
+                    angle=90,
+                    pen=pg.mkPen(color="#334155", width=1.0, style=QtCore.Qt.DashLine),
+                )
+                self.plot_widget.addItem(line)
+                self.day_separator_lines.append(line)
+
+    def datetime_to_x(self, timestamp: Any) -> float:
+        """
+        Converts a datetime, ISO string, or Unix epoch to continuous session X coordinate.
+        Eliminates non-market overnight gaps by mapping each trading day (09:15 to 15:30)
+        to a continuous 22,500-second session slice.
+        """
+        if isinstance(timestamp, (int, float)):
+            if timestamp < 1000000000:
+                # Already a session coordinate
+                return float(timestamp)
+            dt = datetime.fromtimestamp(timestamp)
+        elif isinstance(timestamp, str):
+            try:
+                dt = datetime.fromisoformat(timestamp)
+            except Exception:
+                dt = datetime.now()
+        elif isinstance(timestamp, datetime):
+            dt = timestamp
+        else:
+            dt = datetime.now()
+
+        d_str = dt.strftime("%Y-%m-%d")
+        if d_str not in self.date_map:
+            self.trading_dates.append(d_str)
+            self.date_map[d_str] = len(self.trading_dates) - 1
+            self.time_axis.set_trading_dates(self.trading_dates, self.chk_multiday.isChecked())
+
+        day_idx = self.date_map[d_str]
+        sec_offset = (dt.hour - 9) * 3600 + (dt.minute - 15) * 60 + dt.second + (dt.microsecond / 1e6)
+        sec_offset = max(0.0, min(SESSION_TRADING_SECONDS, sec_offset))
+        return day_idx * SESSION_TRADING_SECONDS + sec_offset
+
+    def x_to_datetime(self, x_val: float) -> datetime:
+        """Converts continuous session X coordinate back to actual market datetime."""
+        day_idx = int(round(x_val) // SESSION_TRADING_SECONDS)
+        sec_offset = int(round(x_val)) % int(SESSION_TRADING_SECONDS)
+
+        if day_idx < 0:
+            day_idx = 0
+            sec_offset = 0
+        elif day_idx >= len(self.trading_dates):
+            day_idx = len(self.trading_dates) - 1
+            sec_offset = int(SESSION_TRADING_SECONDS)
+
+        d_str = self.trading_dates[day_idx]
+        base_dt = datetime.strptime(d_str, "%Y-%m-%d").replace(hour=9, minute=15, second=0)
+        return base_dt + timedelta(seconds=sec_offset)
+
     def _on_multiday_toggled(self, checked: bool) -> None:
         """Handles user clicking the multi-day continuation checkbox."""
         self.time_axis.multiday_mode = checked
@@ -449,13 +586,14 @@ class RelativeStrengthChart(QtWidgets.QWidget):
             "last_ltp": 0.0,
         }
 
-    def append_tick(self, token: str, symbol: str, timestamp_epoch: float, pct_change: float, ltp: float = 0.0) -> None:
+    def append_tick(self, token: str, symbol: str, timestamp_epoch: Any, pct_change: float, ltp: float = 0.0) -> None:
         """Appends a single real-time data point to the stock curve."""
         if token not in self.stock_series:
             self.register_stock(token, symbol)
 
         s = self.stock_series[token]
-        s["raw_x"].append(timestamp_epoch)
+        x_val = self.datetime_to_x(timestamp_epoch)
+        s["raw_x"].append(x_val)
         s["raw_y"].append(pct_change)
         if ltp > 0:
             s["last_ltp"] = ltp
@@ -466,7 +604,7 @@ class RelativeStrengthChart(QtWidgets.QWidget):
 
         tf = self.active_timeframe_minutes
         if tf <= 0:
-            s["x"].append(timestamp_epoch)
+            s["x"].append(x_val)
             s["y"].append(pct_change)
             if len(s["x"]) > 50000:
                 s["x"] = s["x"][-45000:]
@@ -475,20 +613,33 @@ class RelativeStrengthChart(QtWidgets.QWidget):
                 s["curve"].setData(s["x"], s["y"])
         else:
             bucket_sec = tf * 60
-            curr_bucket = int(timestamp_epoch // bucket_sec) * bucket_sec
+            curr_bucket = int(x_val // bucket_sec) * bucket_sec
             if s.get("last_bucket") == curr_bucket and len(s["x"]) > 0:
-                s["x"][-1] = timestamp_epoch
+                s["x"][-1] = x_val
                 s["y"][-1] = pct_change
             else:
                 s["last_bucket"] = curr_bucket
-                s["x"].append(timestamp_epoch)
+                s["x"].append(x_val)
                 s["y"].append(pct_change)
 
             if s["visible"]:
                 s["curve"].setData(s["x"], s["y"])
 
-    def load_historical_bars(self, bars_by_token: Dict[str, List[Dict[str, Any]]]) -> None:
-        """Pre-populates the chart with today's historical data (09:15 - present)."""
+    def load_historical_bars(self, bars_by_token: Dict[str, List[Dict[str, Any]]], trading_dates: Optional[List[str]] = None) -> None:
+        """Pre-populates the chart with historical 1m bars without non-market gaps."""
+        if trading_dates:
+            dates = list(trading_dates)
+        else:
+            dates_set = set()
+            for bars in bars_by_token.values():
+                for b in bars:
+                    t = b["bar_time"]
+                    d_str = t.strftime("%Y-%m-%d") if isinstance(t, datetime) else str(t)[:10]
+                    dates_set.add(d_str)
+            dates = sorted(list(dates_set)) if dates_set else [datetime.now().strftime("%Y-%m-%d")]
+
+        self.set_trading_dates(dates, multiday_mode=self.chk_multiday.isChecked())
+
         all_y_values = []
         for token, bars in bars_by_token.items():
             if not bars:
@@ -499,9 +650,8 @@ class RelativeStrengthChart(QtWidgets.QWidget):
             x_vals = []
             y_vals = []
             for b in bars:
-                dt_obj = b["bar_time"]
-                epoch = dt_obj.timestamp() if isinstance(dt_obj, datetime) else datetime.fromisoformat(str(dt_obj)).timestamp()
-                x_vals.append(epoch)
+                x_val = self.datetime_to_x(b["bar_time"])
+                x_vals.append(x_val)
                 y_vals.append(float(b["close_pct"]))
                 all_y_values.append(float(b["close_pct"]))
 
@@ -722,7 +872,7 @@ class RelativeStrengthChart(QtWidgets.QWidget):
                 s["curve"].setData([], [])
 
     def auto_fit_view(self) -> None:
-        """Auto-scales X and Y axes to frame all available data."""
+        """Auto-scales X and Y axes to frame all available market data without empty borders."""
         self.plot_widget.enableAutoRange()
         vb = self.plot_widget.getViewBox()
         view_range = vb.viewRange()
@@ -730,6 +880,14 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         y_min = min(y_min, -3.0)
         y_max = max(y_max, 3.0)
         self.plot_widget.setYRange(y_min * Y_AXIS_PADDING_PCT, y_max * Y_AXIS_PADDING_PCT)
+
+        # Set clean X range framing active trading sessions
+        all_x_max = [s["x"][-1] for s in self.stock_series.values() if s["x"]]
+        if all_x_max:
+            max_x = max(all_x_max)
+            min_x = min(s["x"][0] for s in self.stock_series.values() if s["x"])
+            pad = max(60.0, (max_x - min_x) * 0.02)
+            self.plot_widget.setXRange(max(0.0, min_x - pad), max_x + pad)
 
     auto_fit = auto_fit_view
 
@@ -752,10 +910,11 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         self.v_crosshair.setVisible(True)
 
         try:
+            hover_dt = self.x_to_datetime(x_val)
             if getattr(self, "chk_multiday", None) and self.chk_multiday.isChecked():
-                hover_time = datetime.fromtimestamp(x_val).strftime("%d %b %H:%M:%S")
+                hover_time = hover_dt.strftime("%d %b %H:%M:%S")
             else:
-                hover_time = datetime.fromtimestamp(x_val).strftime("%H:%M:%S")
+                hover_time = hover_dt.strftime("%H:%M:%S")
         except Exception:
             hover_time = "--:--:--"
 

@@ -170,8 +170,19 @@ def run_all_tests():
     chart.reset_chart_series()
     assert len(chart.stock_series["2885"]["x"]) == 0, "reset_chart_series should clear points"
     if multi_bars:
-        chart.load_historical_bars(multi_bars)
-        assert len(chart.stock_series["2885"]["x"]) > 0, "load_historical_bars should populate multi-day points"
+        chart.load_historical_bars(multi_bars, trading_dates=dates)
+        x_pts = chart.stock_series["2885"]["x"]
+        assert len(x_pts) > 0, "load_historical_bars should populate multi-day points"
+        # Verify overnight gap elimination: max diff between consecutive points must NOT exceed normal session minutes
+        diffs = [x_pts[i+1] - x_pts[i] for i in range(len(x_pts)-1)]
+        assert all(d < 15000 for d in diffs), f"Overnight gap detected in X coordinates! Max diff: {max(diffs)}"
+        print(f"  [PASS] Multi-day session coordinates verified: {len(x_pts)} points continuous without overnight gaps (max step: {max(diffs):.0f}s).")
+
+    # Verify time axis formatting
+    sample_tick_strings = chart.time_axis.tickStrings([0.0, 9900.0, 22500.0], 1, 1)
+    assert len(sample_tick_strings) == 3, "tickStrings should return 3 labels"
+    assert "09:15" in sample_tick_strings[0] or "12:00" in sample_tick_strings[1], f"Unexpected tick strings: {sample_tick_strings}"
+    print(f"  [PASS] Time axis formatting verified: {sample_tick_strings}")
 
     # Toggle back to intraday
     chart.chk_multiday.setChecked(False)
