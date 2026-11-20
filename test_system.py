@@ -112,8 +112,33 @@ def run_all_tests():
 
     filter_panel = FilterPanel()
     filter_panel.add_or_update_stock("2885", "RELIANCE-EQ", "#38BDF8", 0.18)
+    filter_panel.add_or_update_stock("11536", "TCS-EQ", "#10B981", 0.61)
+    filter_panel.add_or_update_stock("3045", "SBIN-EQ", "#F59E0B", 1.20)
 
-    print("  [PASS] Multi-Line Chart, Heatmap, and Filter Panel successfully instantiated.")
+    # Test Search / Filter functionality
+    # 1. Search for 'SBIN' -> Only SBIN-EQ visible
+    filter_panel.inp_search.setText("sbin")
+    assert not filter_panel.items["3045"].isHidden(), "SBIN should be visible"
+    assert filter_panel.items["2885"].isHidden(), "RELIANCE should be hidden"
+    assert filter_panel.items["11536"].isHidden(), "TCS should be hidden"
+    assert not filter_panel.scroll.isHidden(), "Scroll area should be visible"
+    assert filter_panel.no_results_widget.isHidden(), "No results widget should be hidden"
+
+    # 2. Search for non-existent stock -> No results widget shown
+    filter_panel.inp_search.setText("NONEXISTENT")
+    assert filter_panel.scroll.isHidden(), "Scroll area should be hidden when 0 results"
+    assert not filter_panel.no_results_widget.isHidden(), "No results widget should be visible"
+    assert "NONEXISTENT" in filter_panel.lbl_no_results.text()
+
+    # 3. Clear search -> All stocks restored to visible
+    filter_panel.inp_search.clear()
+    assert not filter_panel.items["3045"].isHidden(), "SBIN should be visible"
+    assert not filter_panel.items["2885"].isHidden(), "RELIANCE should be visible"
+    assert not filter_panel.items["11536"].isHidden(), "TCS should be visible"
+    assert not filter_panel.scroll.isHidden(), "Scroll area should be visible"
+    assert filter_panel.no_results_widget.isHidden(), "No results widget should be hidden"
+
+    print("  [PASS] Multi-Line Chart, Heatmap, and Filter Panel (with Watchlist Search) successfully verified.")
 
     print("\n" + "=" * 70)
     print("  ALL 6 RELATIVE STRENGTH & HEATMAP TESTS PASSED SUCCESSFULLY!")

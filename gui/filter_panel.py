@@ -158,6 +158,7 @@ class FilterPanel(QtWidgets.QWidget):
     bulk_filter_applied = QtCore.Signal()
     stock_hover_entered = QtCore.Signal(str)
     stock_hover_left = QtCore.Signal(str)
+    manage_basket_requested = QtCore.Signal()
 
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
@@ -346,6 +347,97 @@ class FilterPanel(QtWidgets.QWidget):
 
         main_layout.addLayout(btn_layout)
 
+        # Search / Filter Box for Watchlist Items
+        search_box = QtWidgets.QVBoxLayout()
+        search_box.setSpacing(2)
+
+        self.inp_search = QtWidgets.QLineEdit()
+        self.inp_search.setPlaceholderText("🔍 Search watchlist (e.g. SBIN)...")
+        self.inp_search.setClearButtonEnabled(True)
+        self.inp_search.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLOR_PANEL_DARK};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid #38BDF8;
+            }}
+        """)
+        self.inp_search.textChanged.connect(self._on_search_text_changed)
+        search_box.addWidget(self.inp_search)
+
+        main_layout.addLayout(search_box)
+
+        # Empty / No Results Widget
+        self.no_results_widget = QtWidgets.QFrame()
+        self.no_results_widget.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_DARK};
+                border: 1px dashed {COLOR_BORDER};
+                border-radius: 6px;
+                padding: 16px 8px;
+            }}
+        """)
+        nr_layout = QtWidgets.QVBoxLayout(self.no_results_widget)
+        nr_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        nr_layout.setSpacing(10)
+
+        self.lbl_no_results = QtWidgets.QLabel("No matching stocks in watchlist")
+        self.lbl_no_results.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.lbl_no_results.setWordWrap(True)
+        self.lbl_no_results.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; font-weight: 500;")
+        nr_layout.addWidget(self.lbl_no_results)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(6)
+        btn_row.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        self.btn_no_results_manage = QtWidgets.QPushButton("+ Manage Basket")
+        self.btn_no_results_manage.setToolTip("Open Manage Basket to search and add this stock")
+        self.btn_no_results_manage.setStyleSheet("""
+            QPushButton {
+                background-color: #2563EB;
+                color: #FFFFFF;
+                border: 1px solid #3B82F6;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1D4ED8;
+            }
+        """)
+        self.btn_no_results_manage.clicked.connect(self.manage_basket_requested.emit)
+        btn_row.addWidget(self.btn_no_results_manage)
+
+        self.btn_no_results_clear = QtWidgets.QPushButton("Clear")
+        self.btn_no_results_clear.setToolTip("Clear search query")
+        self.btn_no_results_clear.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_PANEL_DARK};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #2D3748;
+            }}
+        """)
+        self.btn_no_results_clear.clicked.connect(self.inp_search.clear)
+        btn_row.addWidget(self.btn_no_results_clear)
+
+        nr_layout.addLayout(btn_row)
+        self.no_results_widget.setVisible(False)
+        main_layout.addWidget(self.no_results_widget)
+
         # Scroll area for items
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -381,6 +473,13 @@ class FilterPanel(QtWidgets.QWidget):
             self.items[token] = item
             self.list_layout.insertWidget(self.list_layout.count() - 1, item)
 
+            # Apply active search query if any
+            q = self.inp_search.text().strip().upper()
+            if q:
+                match = (q in symbol.upper()) or (q in token)
+                item.setVisible(match)
+                self.apply_search_filter(q)
+
         self.items[token].update_pct(pct, ltp=ltp, prev_close=prev_close)
 
     def _on_hover_focus_toggled(self, checked: bool) -> None:
@@ -413,6 +512,45 @@ class FilterPanel(QtWidgets.QWidget):
             self.default_order.pop(token, None)
             self.list_layout.removeWidget(item)
             item.deleteLater()
+            q = self.inp_search.text().strip()
+            if q:
+                self.apply_search_filter(q)
+
+    # ==========================================================================
+    # SEARCH / FILTER METHODS
+    # ==========================================================================
+
+    def _on_search_text_changed(self, text: str) -> None:
+        self.apply_search_filter(text)
+
+    def apply_search_filter(self, query: Optional[str] = None) -> None:
+        """Filters watchlist items according to the typed symbol/token query."""
+        if query is None:
+            query = self.inp_search.text()
+        q = query.strip().upper()
+
+        visible_count = 0
+        for item in self.items.values():
+            if not q:
+                item.setVisible(True)
+                visible_count += 1
+            else:
+                match = (q in item.symbol.upper()) or (q in item.token)
+                item.setVisible(match)
+                if match:
+                    visible_count += 1
+
+        if q and visible_count == 0:
+            clean_q = query.strip()
+            self.lbl_no_results.setText(
+                f"No stock matching '{clean_q}' found in watchlist.\n"
+                f"Use 'Manage Basket' to add it."
+            )
+            self.no_results_widget.setVisible(True)
+            self.scroll.setVisible(False)
+        else:
+            self.no_results_widget.setVisible(False)
+            self.scroll.setVisible(True)
 
     # ==========================================================================
     # SORTING METHODS (A-Z, % CHANGE, DEFAULT) & AUTO-REFRESH

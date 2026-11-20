@@ -214,6 +214,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         self.filter_panel.bulk_filter_applied.connect(self.chart.auto_fit)
         self.filter_panel.stock_hover_entered.connect(self.chart.hover_stock)
         self.filter_panel.stock_hover_left.connect(self.chart.unhover_stock)
+        self.filter_panel.manage_basket_requested.connect(self._open_token_manager)
         self.chart_splitter.addWidget(self.filter_panel)
 
         # Wire up Surge Radar live parameter changes
