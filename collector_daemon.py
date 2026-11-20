@@ -22,6 +22,7 @@ from basket_manager import BasketManager
 from config import (
     BAR_AGGREGATE_INTERVAL,
     BATCH_FLUSH_INTERVAL,
+    DAYS_TO_KEEP,
     EVENT_POLL_INTERVAL,
     get_angelone_credentials,
 )
@@ -77,6 +78,14 @@ class RelativeStrengthCollector:
         self.basket_mgr.sync_default_basket(force_reset_to_nifty50=True)
         self.active_tokens = self.db.get_active_basket_tokens()
         logger.info(f"Loaded {len(self.active_tokens)} active official Nifty 50 tokens from MySQL.")
+
+        # 2b. Enforce database retention policy (keep last DAYS_TO_KEEP trading days)
+        try:
+            bars_del, ticks_del = self.db.prune_old_data(days_to_keep=DAYS_TO_KEEP)
+            if bars_del > 0 or ticks_del > 0:
+                logger.info(f"Enforced database retention ({DAYS_TO_KEEP} days): removed {bars_del} bars, {ticks_del} ticks.")
+        except Exception as prune_err:
+            logger.warning(f"Failed to enforce data retention policy: {prune_err}")
 
         # 3. Authenticate with Angel One
         if not self._authenticate():

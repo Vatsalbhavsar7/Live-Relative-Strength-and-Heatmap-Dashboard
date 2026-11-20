@@ -105,13 +105,16 @@ DB_MAX_OVERFLOW = 10
 DB_TIMEOUT = 10
 
 # ==============================================================================
-# 2. INGESTION & DATA STORAGE TIMINGS
+# 2. INGESTION & DATA STORAGE TIMINGS & RETENTION
 # ==============================================================================
 BATCH_FLUSH_INTERVAL = 1.0        # Seconds between micro-batch flushes to MySQL
 EVENT_POLL_INTERVAL = 1.0         # Seconds between checking dynamic token events
 BAR_AGGREGATE_INTERVAL = 60       # 1-minute OHLC relative performance bar creation
 MARKET_OPEN_TIME = "09:15:00"     # NSE Regular Market Opening Time (IST)
 MARKET_CLOSE_TIME = "15:30:00"    # NSE Regular Market Closing Time (IST)
+
+DAYS_TO_KEEP = 5                  # Number of trading days to retain in MySQL database
+DEFAULT_SHOW_MULTIDAY = False     # Default GUI state: False = Today only, True = Multi-day continuation
 
 # ==============================================================================
 # 3. GUI & VISUALIZATION SETTINGS

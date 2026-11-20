@@ -24,6 +24,8 @@ from config import (
     COLOR_PANEL_DARK,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
+    DAYS_TO_KEEP,
+    DEFAULT_SHOW_MULTIDAY,
     DEFAULT_Y_MAX,
     DEFAULT_Y_MIN,
     LINE_PALETTE,
@@ -35,14 +37,34 @@ pg.setConfigOptions(useOpenGL=True, antialias=True)
 
 
 class TimeAxisItem(pg.AxisItem):
-    """Custom PyQtGraph Axis displaying timestamps formatted as HH:MM:SS."""
+    """Custom PyQtGraph Axis displaying timestamps formatted dynamically (intraday vs multi-day)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.multiday_mode: bool = False
 
     def tickStrings(self, values, scale, spacing):
         strings = []
+        valid_dates = []
         for val in values:
             try:
                 dt = datetime.fromtimestamp(val)
-                strings.append(dt.strftime("%H:%M:%S"))
+                valid_dates.append(dt)
+            except Exception:
+                pass
+
+        span_days = self.multiday_mode
+        if not span_days and len(valid_dates) >= 2:
+            if (max(valid_dates).date() - min(valid_dates).date()).days > 0:
+                span_days = True
+
+        for val in values:
+            try:
+                dt = datetime.fromtimestamp(val)
+                if span_days:
+                    strings.append(dt.strftime("%d %b %H:%M"))
+                else:
+                    strings.append(dt.strftime("%H:%M:%S"))
             except Exception:
                 strings.append("")
         return strings
@@ -50,6 +72,8 @@ class TimeAxisItem(pg.AxisItem):
 
 class RelativeStrengthChart(QtWidgets.QWidget):
     """PyQtGraph-based multi-line relative performance chart."""
+
+    multiday_toggled = QtCore.Signal(bool)
 
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
@@ -126,6 +150,33 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         """)
         self.combo_timeframe.currentIndexChanged.connect(self._on_timeframe_changed)
         header_bar.addWidget(self.combo_timeframe)
+
+        # Multi-day continuation checkbox (Past DAYS_TO_KEEP Days)
+        self.chk_multiday = QtWidgets.QCheckBox(f"Past {DAYS_TO_KEEP} Days Continuation")
+        self.chk_multiday.setChecked(DEFAULT_SHOW_MULTIDAY)
+        self.chk_multiday.setToolTip(f"Toggle to view continuous multi-day line chart ({DAYS_TO_KEEP} trading days + live). Uncheck for today's intraday chart only.")
+        self.chk_multiday.setStyleSheet(f"""
+            QCheckBox {{
+                color: #38BDF8;
+                font-size: 11px;
+                font-weight: bold;
+                padding-left: 6px;
+                padding-right: 4px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid {COLOR_BORDER};
+                background-color: {COLOR_PANEL_DARK};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #0284C7;
+                border-color: #38BDF8;
+            }}
+        """)
+        self.chk_multiday.toggled.connect(self._on_multiday_toggled)
+        header_bar.addWidget(self.chk_multiday)
 
         self.btn_autofit = QtWidgets.QPushButton("Auto-Fit View")
         self.btn_autofit.setStyleSheet(f"""
@@ -359,6 +410,21 @@ class RelativeStrengthChart(QtWidgets.QWidget):
 
         self.auto_fit_view()
 
+    def _on_multiday_toggled(self, checked: bool) -> None:
+        """Handles user clicking the multi-day continuation checkbox."""
+        self.time_axis.multiday_mode = checked
+        self.multiday_toggled.emit(checked)
+
+    def reset_chart_series(self) -> None:
+        """Clears all plotted data points while keeping stock registrations, colors, and curve objects."""
+        for s in self.stock_series.values():
+            s["x"] = []
+            s["y"] = []
+            s["raw_x"] = []
+            s["raw_y"] = []
+            s["last_bucket"] = None
+            s["curve"].setData([], [])
+
     def register_stock(self, token: str, symbol: str) -> None:
         """Registers a stock series into the chart if not already present."""
         if token in self.stock_series:
@@ -394,17 +460,17 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         if ltp > 0:
             s["last_ltp"] = ltp
 
-        if len(s["raw_x"]) > 25000:
-            s["raw_x"] = s["raw_x"][-22500:]
-            s["raw_y"] = s["raw_y"][-22500:]
+        if len(s["raw_x"]) > 50000:
+            s["raw_x"] = s["raw_x"][-45000:]
+            s["raw_y"] = s["raw_y"][-45000:]
 
         tf = self.active_timeframe_minutes
         if tf <= 0:
             s["x"].append(timestamp_epoch)
             s["y"].append(pct_change)
-            if len(s["x"]) > 25000:
-                s["x"] = s["x"][-22500:]
-                s["y"] = s["y"][-22500:]
+            if len(s["x"]) > 50000:
+                s["x"] = s["x"][-45000:]
+                s["y"] = s["y"][-45000:]
             if s["visible"]:
                 s["curve"].setData(s["x"], s["y"])
         else:
@@ -686,7 +752,10 @@ class RelativeStrengthChart(QtWidgets.QWidget):
         self.v_crosshair.setVisible(True)
 
         try:
-            hover_time = datetime.fromtimestamp(x_val).strftime("%H:%M:%S")
+            if getattr(self, "chk_multiday", None) and self.chk_multiday.isChecked():
+                hover_time = datetime.fromtimestamp(x_val).strftime("%d %b %H:%M:%S")
+            else:
+                hover_time = datetime.fromtimestamp(x_val).strftime("%H:%M:%S")
         except Exception:
             hover_time = "--:--:--"
 

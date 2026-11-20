@@ -366,3 +366,109 @@ class DatabaseManager:
         except Exception as err:
             logger.error(f"Error fetching ticks since {since_time}: {err}")
             return []
+
+    # ==========================================================================
+    # MULTI-DAY RETENTION & CONTINUATION QUERIES
+    # ==========================================================================
+
+    def fetch_distinct_trading_dates(self, limit: int = 5) -> List[str]:
+        """
+        Fetches the distinct trading dates present in relative_strength_1m_bars.
+        Returns up to `limit` dates sorted chronologically (oldest first, e.g. ['2026-11-16', '2026-11-17', ...]).
+        """
+        sql = """
+            SELECT DISTINCT DATE(bar_time) AS dt
+            FROM relative_strength_1m_bars
+            ORDER BY dt DESC
+            LIMIT %s;
+        """
+        try:
+            conn = self.get_connection()
+            with conn.cursor() as cur:
+                cur.execute(sql, (limit,))
+                rows = cur.fetchall()
+            conn.close()
+            dates = [str(r["dt"]) for r in rows if r.get("dt")]
+            dates.reverse()
+            return dates
+        except Exception as err:
+            logger.error(f"Error fetching distinct trading dates: {err}")
+            return []
+
+    def fetch_multi_day_1m_bars(self, days_to_keep: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Fetches 1-minute bars for the last `days_to_keep` trading days.
+        Returns a dictionary: { token: [ {bar_time, symbol, open_pct, high_pct, low_pct, close_pct, last_ltp, volume}, ... ] }
+        ordered chronologically.
+        """
+        dates = self.fetch_distinct_trading_dates(limit=days_to_keep)
+        if not dates:
+            return self.fetch_today_1m_bars()
+
+        start_date = dates[0]
+        sql = """
+            SELECT bar_time, token, symbol, open_pct, high_pct, low_pct, close_pct, last_ltp, volume
+            FROM relative_strength_1m_bars
+            WHERE bar_time >= CONCAT(%s, ' 09:15:00')
+            ORDER BY bar_time ASC;
+        """
+        try:
+            conn = self.get_connection()
+            with conn.cursor() as cur:
+                cur.execute(sql, (start_date,))
+                rows = cur.fetchall()
+            conn.close()
+
+            grouped: Dict[str, List[Dict[str, Any]]] = {}
+            for r in rows:
+                tok = str(r["token"])
+                if tok not in grouped:
+                    grouped[tok] = []
+                grouped[tok].append(r)
+            return grouped
+        except Exception as err:
+            logger.error(f"Error fetching multi-day 1m bars from {start_date}: {err}")
+            return {}
+
+    def prune_old_data(self, days_to_keep: int = 5) -> Tuple[int, int]:
+        """
+        Prunes records in relative_strength_1m_bars and relative_strength_ticks
+        that are older than the last `days_to_keep` trading days.
+        Uses batch-chunking to avoid large InnoDB transaction locks.
+        Returns (bars_deleted, ticks_deleted).
+        """
+        dates = self.fetch_distinct_trading_dates(limit=days_to_keep)
+        if not dates or len(dates) < days_to_keep:
+            # We don't exceed days_to_keep trading days yet; no pruning needed
+            return (0, 0)
+
+        cutoff_date = dates[0]  # Oldest date in the kept window
+        cutoff_str = f"{cutoff_date} 00:00:00"
+
+        bars_deleted = 0
+        ticks_deleted = 0
+        try:
+            conn = self.get_connection()
+            with conn.cursor() as cur:
+                # 1. Delete old 1-minute bars (small table, instantaneous)
+                cur.execute("DELETE FROM relative_strength_1m_bars WHERE bar_time < %s;", (cutoff_str,))
+                bars_deleted = cur.rowcount
+
+                # 2. Delete old ticks in micro-batches of 25,000
+                while True:
+                    cur.execute("DELETE FROM relative_strength_ticks WHERE tick_time < %s LIMIT 25000;", (cutoff_str,))
+                    chunk_count = cur.rowcount
+                    ticks_deleted += chunk_count
+                    if chunk_count == 0:
+                        break
+
+            conn.close()
+            if bars_deleted > 0 or ticks_deleted > 0:
+                logger.info(
+                    f"Data retention pruning completed (retention: {days_to_keep} days, cutoff: {cutoff_str}): "
+                    f"Deleted {bars_deleted} old bars and {ticks_deleted} old ticks."
+                )
+            return (bars_deleted, ticks_deleted)
+        except Exception as err:
+            logger.error(f"Error during data retention pruning: {err}")
+            return (0, 0)

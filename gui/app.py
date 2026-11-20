@@ -22,6 +22,8 @@ from config import (
     COLOR_PANEL_DARK,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
+    DAYS_TO_KEEP,
+    DEFAULT_SHOW_MULTIDAY,
     MARKET_CLOSE_TIME,
     MARKET_OPEN_TIME,
     UI_POLL_INTERVAL_MS,
@@ -205,6 +207,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
 
         # Left: Multi-Line Relative Strength Chart (PyQtGraph)
         self.chart = RelativeStrengthChart()
+        self.chart.multiday_toggled.connect(self._on_multiday_toggled)
         self.chart_splitter.addWidget(self.chart)
 
         # Right: Watchlist & Quick Filter Sidebar
@@ -306,14 +309,56 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
             if self.heatmap.is_engine_enabled:
                 self.heatmap.register_or_update_tile(tok, sym, pct_change=0.0, ltp=prev_px, mcap=mcap)
 
-        # Load 1-minute historical bars from 09:15 onwards
-        bars = self.db.fetch_today_1m_bars()
+        # Load 1-minute historical bars (today or multi-day based on initial checkbox state)
+        if self.chart.chk_multiday.isChecked():
+            bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
+            logger.info(f"Bootstrapping multi-day continuation bars ({DAYS_TO_KEEP} days) for {len(bars)} tokens.")
+        else:
+            bars = self.db.fetch_today_1m_bars()
+            logger.info(f"Bootstrapping today's historical 1m bars for {len(bars)} tokens.")
+
         if bars:
-            logger.info(f"Loaded today's historical 1m bars for {len(bars)} tokens.")
             self.chart.load_historical_bars(bars)
 
         self._evaluate_radar_surges()
         self.last_poll_time = datetime.now() - timedelta(seconds=2)
+
+    def _on_multiday_toggled(self, is_multiday: bool) -> None:
+        """Reloads chart series when user toggles between today's chart and multi-day continuation."""
+        logger.info(f"Multi-day view toggled: {is_multiday} (retention: {DAYS_TO_KEEP} days)")
+        self.chart.reset_chart_series()
+        if is_multiday:
+            bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
+            mode_lbl = f"past {DAYS_TO_KEEP} days continuation"
+        else:
+            bars = self.db.fetch_today_1m_bars()
+            mode_lbl = "today's intraday"
+
+        if bars:
+            logger.info(f"Loaded {mode_lbl} 1m bars for {len(bars)} tokens.")
+            self.chart.load_historical_bars(bars)
+
+            # Replay any granular ticks logged since the newest bar time up to now
+            try:
+                latest_bar_time = max(
+                    (b["bar_time"] for bar_list in bars.values() for b in bar_list if "bar_time" in b),
+                    default=None,
+                )
+                if latest_bar_time:
+                    recent_ticks = self.db.fetch_latest_ticks_since(latest_bar_time)
+                    for t in recent_ticks:
+                        t_tok = str(t["token"])
+                        t_sym = str(t["symbol"])
+                        t_pct = round(float(t["pct_change"]), 2)
+                        t_ltp = round(float(t["ltp"]), 2)
+                        t_time = t["tick_time"]
+                        epoch = t_time.timestamp() if isinstance(t_time, datetime) else datetime.fromisoformat(str(t_time)).timestamp()
+                        self.chart.append_tick(t_tok, t_sym, epoch, t_pct, ltp=t_ltp)
+            except Exception as replay_err:
+                logger.warning(f"Error replaying post-bar ticks during multi-day reload: {replay_err}")
+
+        self.chart.auto_fit_view()
+        self._evaluate_radar_surges()
 
     # ==========================================================================
     # LIVE STREAMING TICKS POLLER (EVERY 500ms)

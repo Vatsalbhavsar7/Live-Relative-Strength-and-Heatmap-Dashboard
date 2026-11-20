@@ -140,8 +140,53 @@ def run_all_tests():
 
     print("  [PASS] Multi-Line Chart, Heatmap, and Filter Panel (with Watchlist Search) successfully verified.")
 
+    # TEST 7: Multi-Day Retention & Continuation Chart Features
+    print("\n[TEST 7/7] Testing Multi-Day Retention & Continuation Chart...")
+    from config import DAYS_TO_KEEP, DEFAULT_SHOW_MULTIDAY
+
+    # 7a. Distinct trading dates query
+    dates = db.fetch_distinct_trading_dates(limit=DAYS_TO_KEEP)
+    assert isinstance(dates, list), "fetch_distinct_trading_dates should return a list"
+    print(f"  [PASS] Distinct trading dates retrieved (up to {DAYS_TO_KEEP} days): {dates}")
+
+    # 7b. Multi-day 1m bars query
+    multi_bars = db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
+    assert isinstance(multi_bars, dict), "fetch_multi_day_1m_bars should return a dict"
+    print(f"  [PASS] Multi-day 1m bars fetched for {len(multi_bars)} tokens.")
+
+    # 7c. Multi-day checkbox and signal in RelativeStrengthChart
+    assert hasattr(chart, "chk_multiday"), "Chart should have chk_multiday checkbox"
+    assert chart.chk_multiday.isChecked() == DEFAULT_SHOW_MULTIDAY, "Default checkbox state mismatch"
+
+    signal_received = []
+    chart.multiday_toggled.connect(lambda val: signal_received.append(val))
+
+    # Toggle to multi-day
+    chart.chk_multiday.setChecked(True)
+    assert chart.time_axis.multiday_mode is True, "TimeAxisItem should be in multiday_mode when checked"
+    assert signal_received == [True], f"Signal expected [True], got {signal_received}"
+
+    # Verify reset_chart_series and load_historical_bars with multi-day bars
+    chart.reset_chart_series()
+    assert len(chart.stock_series["2885"]["x"]) == 0, "reset_chart_series should clear points"
+    if multi_bars:
+        chart.load_historical_bars(multi_bars)
+        assert len(chart.stock_series["2885"]["x"]) > 0, "load_historical_bars should populate multi-day points"
+
+    # Toggle back to intraday
+    chart.chk_multiday.setChecked(False)
+    assert chart.time_axis.multiday_mode is False, "TimeAxisItem multiday_mode should be False when unchecked"
+    assert signal_received == [True, False], f"Signal expected [True, False], got {signal_received}"
+
+    # 7d. Prune old data verification (safe execution)
+    prune_res = db.prune_old_data(days_to_keep=DAYS_TO_KEEP)
+    assert isinstance(prune_res, tuple) and len(prune_res) == 2, "prune_old_data should return (bars_deleted, ticks_deleted)"
+    print(f"  [PASS] Prune old data executed successfully: removed {prune_res[0]} bars, {prune_res[1]} ticks.")
+
+    print("  [PASS] Multi-day retention & continuation chart features fully verified.")
+
     print("\n" + "=" * 70)
-    print("  ALL 6 RELATIVE STRENGTH & HEATMAP TESTS PASSED SUCCESSFULLY!")
+    print("  ALL 7 RELATIVE STRENGTH & HEATMAP TESTS PASSED SUCCESSFULLY!")
     print("=" * 70 + "\n")
 
 
