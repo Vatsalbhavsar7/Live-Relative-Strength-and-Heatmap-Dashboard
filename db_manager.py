@@ -337,19 +337,19 @@ class DatabaseManager:
             return 0
 
     # ==========================================================================
-    # HISTORICAL INTRADAY QUERY FOR GUI INITIALIZATION (09:15 - NOW)
+    # HISTORICAL INTRADAY QUERY FOR GUI INITIALIZATION (09:00 - NOW)
     # ==========================================================================
 
     def fetch_today_1m_bars(self) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Fetches today's 1-minute bars from 09:15:00 onwards for all active tokens.
+        Fetches today's 1-minute bars from market start onwards for all active tokens.
         Returns a dictionary: { token: [ {bar_time, close_pct, ltp, ...}, ... ] }
         """
         today_date = datetime.now().strftime("%Y-%m-%d")
         sql = """
             SELECT bar_time, token, symbol, open_pct, high_pct, low_pct, close_pct, last_ltp, volume
             FROM relative_strength_1m_bars
-            WHERE bar_time >= CONCAT(%s, ' 09:15:00')
+            WHERE bar_time >= CONCAT(%s, ' 00:00:00')
             ORDER BY bar_time ASC;
         """
         try:
@@ -431,7 +431,7 @@ class DatabaseManager:
         sql = """
             SELECT bar_time, token, symbol, open_pct, high_pct, low_pct, close_pct, last_ltp, volume
             FROM relative_strength_1m_bars
-            WHERE bar_time >= CONCAT(%s, ' 09:15:00')
+            WHERE bar_time >= CONCAT(%s, ' 00:00:00')
             ORDER BY bar_time ASC;
         """
         try:

@@ -8,7 +8,7 @@
     "database": "algo_relative_strength"
   },
   "_instructions": {
-    "linux_pc_server": "Leave host as 'localhost' on your Linux PC where MySQL server runs.",
-    "laptop_client": "Set host to your Linux PC's Tailscale IP (e.g. '100.85.120.45') to connect from anywhere in the world."
+    "linux_pc_server": "Keep host as 'localhost' and port 3306 on your Linux PC.",
+    "laptop_client": "Set host to your Linux PC IP (e.g. '192.168.2.130') and port to 3307 (Zero-Sudo bridge) to connect."
   }
 }

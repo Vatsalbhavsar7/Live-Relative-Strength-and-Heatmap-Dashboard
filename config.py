@@ -4,7 +4,7 @@ config.py
 Configuration parameters for the Live Relative Strength & Heatmap Dashboard:
 - MySQL Database connection settings.
 - Ingestion rates, batch flushing, and 1-minute bar aggregation.
-- Market session hours (09:15 - 15:30 IST).
+- Market session hours (09:00 - 15:30 IST).
 - Credentials loader supporting `credentials.json` and environment variables.
 - GUI styling, color palettes, and interactive thresholds.
 """
@@ -34,14 +34,20 @@ ANGELONE_TOTP_SECRET = ""
 
 # ------------------------------------------------------------------------------
 # 2. DATABASE CONFIGURATION (MySQL):
+# ------------------------------------------------------------------------------
+# CASE A: SINGLE-DEVICE MODE (Both Collector & Dashboard run on SAME computer):
+#   DB_HOST = "localhost"
+#   DB_PORT = 3306
 #
-# • SINGLE-DEVICE MODE (Default - Collector & Dashboard both on SAME machine):
-#     DB_HOST = "localhost"
-#     DB_PORT = 3306
+# CASE B: TWO-DEVICE CLIENT/SERVER MODE (PC collects data 24/7, Laptop views GUI):
+#   • On Linux PC (Server - running run_collector.py 24/7):
+#       DB_HOST = "localhost"
+#       DB_PORT = 3306
+#     (run_collector.py automatically starts the Zero-Sudo TCP Bridge on port 3307)
 #
-# • TWO-DEVICE MODE (Linux PC collects data, Windows Laptop runs Dashboard):
-#     - On Linux PC (Server): Keep DB_HOST = "localhost", DB_PORT = 3306
-#     - On Windows Laptop (Client): Set DB_HOST = "192.168.2.130", DB_PORT = 3307
+#   • On Windows Laptop (Client - running run_dashboard.py only):
+#       DB_HOST = "192.168.2.130"   # <-- Replace with your Linux PC's LAN IP address
+#       DB_PORT = 3307               # <-- Connects to remote PC via Python TCP Bridge (Zero Sudo)
 # ------------------------------------------------------------------------------
 DB_HOST = "localhost"
 DB_PORT = 3306
@@ -227,7 +233,7 @@ DB_TIMEOUT = 10
 BATCH_FLUSH_INTERVAL = 1.0        # Seconds between micro-batch flushes to MySQL
 EVENT_POLL_INTERVAL = 1.0         # Seconds between checking dynamic token events
 BAR_AGGREGATE_INTERVAL = 60       # 1-minute OHLC relative performance bar creation
-MARKET_OPEN_TIME = "09:15:00"     # NSE Regular Market Opening Time (IST)
+MARKET_OPEN_TIME = "09:00:00"     # NSE Market Opening Time (IST) - Captures Pre-Market & Regular Hours
 MARKET_CLOSE_TIME = "15:30:00"    # NSE Regular Market Closing Time (IST)
 
 DAYS_TO_KEEP = 5                  # Number of trading days to retain in MySQL database

@@ -2,7 +2,7 @@
 projects/06_live_relative_strength_and_heatmap_dashboard/market_scheduler.py
 -----------------------------------------------------------------------------
 Autonomous Market Scheduling Engine for Relative Strength Collector Daemon:
-- Detects Monday-Friday trading hours (09:15 - 15:30 IST).
+- Detects Monday-Friday trading hours (09:00 - 15:30 IST).
 - Detects Saturday/Sunday weekends and automatically sleeps without API calls.
 - Supports NSE/BSE holiday calendar and special trading sessions (e.g. Diwali Muhurat).
 - Supports Admin Maintenance Mode toggle for instant pausing without code edits.

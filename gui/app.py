@@ -97,7 +97,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         header_bar.addLayout(title_box)
 
         # Market Timing & Live Clock
-        self.lbl_clock = QtWidgets.QLabel("TIME: --:--:-- | MARKET: 09:15 - 15:30")
+        self.lbl_clock = QtWidgets.QLabel("TIME: --:--:-- | MARKET: 09:00 - 15:30")
         self.lbl_clock.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; font-weight: 500;")
         header_bar.addWidget(self.lbl_clock)
 
@@ -295,7 +295,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
             self.heatmap.register_or_update_tile(tok, sym, pct, ltp, mcap, force=True)
 
     # ==========================================================================
-    # DATA BOOTSTRAP: 09:15 HISTORICAL REPLAY & BASKET SYNC
+    # DATA BOOTSTRAP: 09:00 HISTORICAL REPLAY & BASKET SYNC
     # ==========================================================================
 
     def _bootstrap_data(self) -> None:
@@ -411,7 +411,7 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
     def _poll_live_updates(self) -> None:
         """Queries recent ticks from MySQL and streams updates across chart, heatmap, and filters."""
         now_dt = datetime.now()
-        self.lbl_clock.setText(f"TIME: {now_dt.strftime('%H:%M:%S')} | MARKET: 09:15 - 15:30")
+        self.lbl_clock.setText(f"TIME: {now_dt.strftime('%H:%M:%S')} | MARKET: 09:00 - 15:30")
 
         try:
             ticks = self.db.fetch_latest_ticks_since(self.last_poll_time)

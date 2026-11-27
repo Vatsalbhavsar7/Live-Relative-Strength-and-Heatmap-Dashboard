@@ -91,58 +91,47 @@ If your office Wi-Fi and office LAN are isolated by a firewall/VLAN, or if you t
 
 ---
 
-## 4. Configure MySQL Database on Linux PC
+## 4. Zero-Sudo Remote Access via Python TCP Bridge (Port 3307)
 
-To allow the Windows Laptop dashboard to read MySQL data:
+You **do not need `sudo` privileges** or system administrator access on the Linux PC!
 
-### A. Set MySQL to Listen on Network Interfaces
-In `/etc/mysql/mysql.conf.d/mysqld.cnf` (or `/etc/my.cnf`):
-```ini
-[mysqld]
-bind-address = 0.0.0.0
-```
-Restart MySQL:
-```bash
-sudo systemctl restart mysql   # If you have sudo
-# Or restart your user-level MySQL/MariaDB service
-```
-
-### B. Grant Remote Access to MySQL User
-Log into MySQL on Linux:
-```bash
-mysql -u root -p
-```
-Run:
-```sql
-CREATE DATABASE IF NOT EXISTS algo_relative_strength CHARACTER SET utf8mb4;
-
--- Create remote trader user
-CREATE USER IF NOT EXISTS 'trader'@'%' IDENTIFIED BY 'trader_password';
-GRANT ALL PRIVILEGES ON algo_relative_strength.* TO 'trader'@'%';
-FLUSH PRIVILEGES;
-```
+`run_collector.py` contains a built-in user-space TCP forwarder (`tcp_bridge.py`):
+- When you launch `python3 run_collector.py` on Linux, it automatically starts listening on `0.0.0.0:3307`.
+- Any query received on port 3307 is forwarded locally to MySQL (`127.0.0.1:3306`).
+- **No changes needed to `/etc/mysql/mysql.conf.d/mysqld.cnf`!**
+- **No `sudo systemctl restart mysql` needed!**
+- **No firewall adjustments needed** if connecting over LAN or Tailscale!
 
 ---
 
 ## 5. Configure Windows Laptop Dashboard (Client)
 
-On your Windows laptop:
-1. Open `projects\06_live_relative_strength_and_heatmap_dashboard`.
-2. Copy `connection_config.example.json` to `connection_config.json`:
-   ```powershell
-   cp connection_config.example.json connection_config.json
-   ```
-3. Edit `connection_config.json`:
-   ```json
-   {
-     "host": "192.168.1.50",
-     "port": 3306,
-     "user": "trader",
-     "password": "trader_password",
-     "database": "algo_relative_strength"
-   }
-   ```
-   *(Replace `"host"` with either your PC's Office LAN IP or Tailscale IP).*
+To connect your Windows Laptop dashboard to the Linux PC, choose either method:
+
+### Method A: Quick Edit in `config.py` (Easiest)
+In `config.py` on your Windows Laptop, change only two lines:
+```python
+DB_HOST = "192.168.2.130"   # <-- Replace with your Linux PC's LAN IP address
+DB_PORT = 3307               # <-- Port 3307 routes to MySQL via Python TCP Bridge
+```
+
+### Method B: Using `connection_config.json`
+Create or copy `connection_config.json` in the project folder:
+```json
+{
+  "host": "192.168.2.130",
+  "port": 3307,
+  "user": "root",
+  "password": "Admin@123",
+  "database": "algo_relative_strength"
+}
+```
+
+Then run on your Windows Laptop:
+```powershell
+python run_dashboard.py
+```
+The dashboard connects immediately, displays live relative strength curves, momentum radar, and heatmaps without saving anything locally!
 
 ---
 
