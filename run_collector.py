@@ -154,6 +154,16 @@ def run_scheduled_daemon(scheduler: MarketScheduler) -> None:
             active_collector = RelativeStrengthCollector()
             active_collector.start()
 
+            # If collector failed to start (e.g. auth failed), back off cleanly
+            if not active_collector.running:
+                logger.error("Collector failed to start. Check credentials. Retrying in 15 seconds...")
+                print("\n[!] Collector failed to start. Retrying in 15 seconds (Press Ctrl+C to abort)...")
+                for _ in range(15):
+                    if _TERMINATION_REQUESTED:
+                        break
+                    time.sleep(1.0)
+                continue
+
             # Ingest ticks until session end or termination
             while active_collector.running and not _TERMINATION_REQUESTED:
                 # Sleep in short slices for responsive shutdown

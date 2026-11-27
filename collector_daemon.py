@@ -181,7 +181,13 @@ class RelativeStrengthCollector:
         totp_secret = creds.get("totp_secret", "")
 
         if not api_key or not client_code:
-            logger.error("No active Angel One credentials found in USER_CREDENTIALS.json.")
+            logger.error("No active Angel One credentials found in credentials.json or USER_CREDENTIALS.json.")
+            print("\n" + "!" * 76)
+            print("  [ERROR] Angel One credentials not found!")
+            print("  Please create 'credentials.json' in this project directory:")
+            print("    cp credentials.example.json credentials.json")
+            print("  and fill in your api_key, client_code, password, and totp_secret.")
+            print("!" * 76 + "\n")
             return False
 
         user_dict = {
