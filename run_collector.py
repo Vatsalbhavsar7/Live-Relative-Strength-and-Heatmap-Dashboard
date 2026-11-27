@@ -19,6 +19,10 @@ import signal
 import sys
 import time
 from typing import Optional
+import warnings
+
+# Suppress Python 3.8 CryptographyDeprecationWarning and other third-party deprecation warnings
+warnings.filterwarnings("ignore")
 
 try:
     import _bootstrap_path
@@ -98,11 +102,16 @@ def print_status_banner(scheduler: MarketScheduler) -> None:
     print("-" * 78)
     print("  ANGEL ONE ACCOUNT & STATIC IP STATUS:")
     if client_code:
-        print(f"    • Client Code / ID : {client_code} (Active in USER_CREDENTIALS.json)")
+        print(f"    • Client Code / ID : {client_code} (Active in credentials.json / USER_CREDENTIALS.json)")
     else:
-        print("    • Client Code / ID : [!] Not Configured! Set USER_CREDENTIALS.json")
+        print("    • Client Code / ID : [!] NOT CONFIGURED!")
+        print("                         Please copy credentials.example.json -> credentials.json")
+        print("                         and set your Angel One api_key, client_code, password, totp_secret.")
     print("    • Static IP Note   : PC (LAN) and Laptop (Wi-Fi) share the same Office Router")
     print("                         outbound static IP. No changes needed in Angel One portal.")
+    print("-" * 78)
+    print("  [Tip] '--status' is a diagnostic check tool. To start the live collector daemon,")
+    print("        run: python3 run_collector.py (without the --status flag)")
     print("=" * 78 + "\n")
 
 
@@ -228,6 +237,22 @@ def main():
         return
 
     print_status_banner(scheduler)
+
+    creds = get_angelone_credentials()
+    if not creds.get("client_code") or not creds.get("api_key"):
+        print("\n" + "!" * 78)
+        print("  [ERROR] Angel One credentials are not configured!")
+        print("  To fix this:")
+        print("    1. Copy the example credentials file:")
+        print("       cp credentials.example.json credentials.json")
+        print("    2. Open 'credentials.json' and fill in:")
+        print("       - api_key")
+        print("       - client_code (Angel One User ID)")
+        print("       - password (PIN or password)")
+        print("       - totp_secret (TOTP Authenticator Secret Key)")
+        print("  Then run 'python3 run_collector.py' again.")
+        print("!" * 78 + "\n")
+        sys.exit(1)
 
     if args.now:
         print("[!] --force / --now flag specified: Running collector immediately outside schedule...")
