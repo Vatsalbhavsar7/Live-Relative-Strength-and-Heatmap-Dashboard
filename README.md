@@ -264,6 +264,17 @@ python test_system.py
 
 ---
 
+## 🌐 Multi-Device Server & Client Setup (Linux PC + Windows Laptop)
+
+The platform supports running as a **distributed server-client system**:
+- **Server (Linux PC)**: Runs `run_collector.py` 24/7 in `tmux` or `nohup` (no `sudo` required). Wakes up at 09:14:00 AM on trading days, collects live ticks and aggregates 1-minute bars into MySQL, flushes & closes at 15:30:30 PM, and automatically sleeps on weekends & holidays.
+- **Client (Windows Laptop)**: Runs `run_dashboard.py` anytime to view live feeds, 5-day continuous charts, surge radar, and heatmaps.
+- **Automatic IP Discovery**: Starting `run_collector.py` automatically prints the PC's Office LAN IP and Tailscale IP in the console.
+
+See [MULTI_DEVICE_SETUP_GUIDE.md](MULTI_DEVICE_SETUP_GUIDE.md) for detailed step-by-step instructions.
+
+---
+
 ## 📂 Repository Structure
 
 ```text
@@ -278,8 +289,8 @@ Live-Relative-Strength-and-Heatmap-Dashboard/
 │
 ├── gui/                                # PySide6 Native Desktop Application
 │   ├── __init__.py
-│   ├── app.py                          # Main QMainWindow with dual-tab interface
-│   ├── multi_line_chart.py             # OpenGL PyQtGraph chart, Surge Radar & Smart HUD
+│   ├── app.py                          # Main QMainWindow with dual-tab & DB connection badge
+│   ├── multi_line_chart.py             # OpenGL PyQtGraph chart, 5-Day Continuation, Surge Radar
 │   ├── heatmap_widget.py               # Market-cap treemap & equal-weighted heatmap
 │   ├── filter_panel.py                 # Watchlist sidebar with auto-sorting & presets
 │   └── token_manager_dialog.py         # Modal zero-restart basket management dialog
@@ -287,13 +298,17 @@ Live-Relative-Strength-and-Heatmap-Dashboard/
 ├── add_token.py                        # CLI tool for dynamic hot-add/remove
 ├── basket_manager.py                   # Official Nifty 50 catalog & instrument metadata
 ├── collector_daemon.py                 # Headless background ingestion service
-├── config.py                           # Central configuration & credentials manager
+├── config.py                           # Central configuration, IP discovery & credentials manager
+├── connection_config.example.json      # Remote MySQL configuration template (for client laptop)
 ├── credentials.example.json            # Safe configuration template (NO real keys)
-├── db_manager.py                       # High-performance MySQL connection & queries
+├── db_manager.py                       # High-performance MySQL connection & chunked queries
+├── market_calendar.json                # NSE holidays, special sessions & maintenance mode config
+├── market_scheduler.py                 # Autonomous 24/7 market scheduling & countdown engine
+├── MULTI_DEVICE_SETUP_GUIDE.md         # Complete Linux server & Windows client setup guide
 ├── requirements.txt                    # Pinned Python package dependencies
-├── run_collector.py                    # Service 1 entry point
-├── run_dashboard.py                    # Service 2 entry point
-├── test_system.py                      # Comprehensive verification test suite
+├── run_collector.py                    # Service 1 entry point (24/7 daemon / --status / --now)
+├── run_dashboard.py                    # Service 2 entry point (PySide6 desktop visualizer)
+├── test_system.py                      # Comprehensive 8-test verification test suite
 └── README.md                           # Documentation & architecture guide
 ```
 

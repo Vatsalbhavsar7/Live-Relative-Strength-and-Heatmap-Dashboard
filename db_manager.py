@@ -1,7 +1,7 @@
 """
-db_manager.py
--------------
-High-performance MySQL database management layer for Live Relative Strength and Heatmap Dashboard:
+projects/06_live_relative_strength_and_heatmap_dashboard/db_manager.py
+------------------------------------------------------------------------
+High-performance MySQL database management layer for Project 06:
 - Connection pooling and auto-reconnect resilience.
 - Auto-initialization of schema (database, tables, indexes).
 - High-throughput micro-batch insertion of tick snapshots.
@@ -9,10 +9,15 @@ High-performance MySQL database management layer for Live Relative Strength and 
 - Dynamic token event streaming for zero-restart subscription updates.
 """
 
-from datetime import datetime
+from datetime import datetime, time as dtime
 from typing import Any, Dict, List, Optional, Tuple
 import pymysql
 from pymysql.cursors import DictCursor
+
+try:
+    import _bootstrap_path
+except ImportError:
+    pass
 
 from config import (
     DB_HOST,
@@ -22,7 +27,10 @@ from config import (
     DB_TIMEOUT,
     DB_USER,
 )
-from core.logger import get_logger
+try:
+    from core.logger import get_logger
+except ImportError:
+    from utils.logger import get_logger
 
 logger = get_logger("relative_strength.db")
 
@@ -56,6 +64,20 @@ class DatabaseManager:
             cursorclass=DictCursor,
             autocommit=True,
         )
+
+    def test_connection(self) -> Tuple[bool, str]:
+        """
+        Tests database connectivity.
+        Returns: (is_connected, message)
+        """
+        try:
+            conn = self.get_connection(include_db=True)
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+            conn.close()
+            return True, "Connected"
+        except Exception as err:
+            return False, str(err)
 
     def initialize_schema(self) -> bool:
         """
@@ -430,11 +452,11 @@ class DatabaseManager:
             logger.error(f"Error fetching multi-day 1m bars from {start_date}: {err}")
             return {}
 
-    def prune_old_data(self, days_to_keep: int = 5) -> Tuple[int, int]:
+    def prune_old_data(self, days_to_keep: int = 5, max_tick_batches: int = 20) -> Tuple[int, int]:
         """
         Prunes records in relative_strength_1m_bars and relative_strength_ticks
         that are older than the last `days_to_keep` trading days.
-        Uses batch-chunking to avoid large InnoDB transaction locks.
+        Uses batch-chunking (up to max_tick_batches of 25,000) to avoid long InnoDB transaction locks.
         Returns (bars_deleted, ticks_deleted).
         """
         dates = self.fetch_distinct_trading_dates(limit=days_to_keep)
@@ -454,12 +476,14 @@ class DatabaseManager:
                 cur.execute("DELETE FROM relative_strength_1m_bars WHERE bar_time < %s;", (cutoff_str,))
                 bars_deleted = cur.rowcount
 
-                # 2. Delete old ticks in micro-batches of 25,000
-                while True:
+                # 2. Delete old ticks in micro-batches of 25,000 (up to max_tick_batches)
+                batches_run = 0
+                while batches_run < max_tick_batches:
                     cur.execute("DELETE FROM relative_strength_ticks WHERE tick_time < %s LIMIT 25000;", (cutoff_str,))
                     chunk_count = cur.rowcount
                     ticks_deleted += chunk_count
-                    if chunk_count == 0:
+                    batches_run += 1
+                    if chunk_count < 25000:
                         break
 
             conn.close()

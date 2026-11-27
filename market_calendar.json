@@ -1,0 +1,31 @@
+{
+  "_comment": "NSE / BSE Market Schedule & Holiday Calendar for Relative Strength Collector Daemon",
+  "holidays": [
+    "2026-01-26",
+    "2026-03-03",
+    "2026-03-27",
+    "2026-04-03",
+    "2026-04-14",
+    "2026-05-01",
+    "2026-08-15",
+    "2026-10-02",
+    "2026-11-08",
+    "2026-12-25"
+  ],
+  "special_sessions": {
+    "2026-11-08": {
+      "start_time": "18:00:00",
+      "end_time": "19:15:00",
+      "description": "Diwali Laxmi Pujan Muhurat Trading Session"
+    }
+  },
+  "maintenance_mode": false,
+  "force_run": false,
+  "pre_market_seconds": 60,
+  "post_market_seconds": 30,
+  "_admin_notes": {
+    "maintenance_mode": "Set to true if you want to perform system maintenance or pause data collection for the day. Code will cleanly sleep and not hit Angel One.",
+    "force_run": "Set to true (or run with --now / --force) to test data collection outside market hours.",
+    "special_sessions": "Add any Saturday/Sunday special sessions here (e.g. disaster recovery mock tests or Muhurat trading). Format: YYYY-MM-DD: {start_time, end_time, description}."
+  }
+}

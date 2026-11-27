@@ -1,0 +1,14 @@
+{
+  "_comment": "Configure database connection for multi-device setup. Copy this file to connection_config.json",
+  "mysql": {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "Admin@123",
+    "database": "algo_relative_strength"
+  },
+  "_instructions": {
+    "linux_pc_server": "Leave host as 'localhost' on your Linux PC where MySQL server runs.",
+    "laptop_client": "Set host to your Linux PC's Tailscale IP (e.g. '100.85.120.45') to connect from anywhere in the world."
+  }
+}

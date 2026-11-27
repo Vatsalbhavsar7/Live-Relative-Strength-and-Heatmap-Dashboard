@@ -27,6 +27,7 @@ from config import (
     MARKET_CLOSE_TIME,
     MARKET_OPEN_TIME,
     UI_POLL_INTERVAL_MS,
+    get_database_config,
 )
 from db_manager import DatabaseManager
 from gui.filter_panel import FilterPanel
@@ -99,6 +100,14 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         self.lbl_clock = QtWidgets.QLabel("TIME: --:--:-- | MARKET: 09:15 - 15:30")
         self.lbl_clock.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; font-weight: 500;")
         header_bar.addWidget(self.lbl_clock)
+
+        # Database / Server Connection Badge (Supports Localhost & Remote Multi-Device via Tailscale)
+        db_cfg = get_database_config()
+        self.db_host = db_cfg.get("host", "localhost")
+        self.is_remote_db = self.db_host not in ("localhost", "127.0.0.1", "::1")
+        self.lbl_db_badge = QtWidgets.QLabel()
+        self._update_db_badge(is_connected=True)
+        header_bar.addWidget(self.lbl_db_badge)
 
         header_bar.addStretch()
 
@@ -311,16 +320,14 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
 
         # Load 1-minute historical bars (today or multi-day based on initial checkbox state)
         if self.chart.chk_multiday.isChecked():
-            dates = self.db.fetch_distinct_trading_dates(limit=DAYS_TO_KEEP)
             bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
-            logger.info(f"Bootstrapping multi-day continuation bars ({len(dates)} days) for {len(bars)} tokens.")
+            logger.info(f"Bootstrapping multi-day continuation bars ({DAYS_TO_KEEP} days) for {len(bars)} tokens.")
         else:
-            dates = [datetime.now().strftime("%Y-%m-%d")]
             bars = self.db.fetch_today_1m_bars()
             logger.info(f"Bootstrapping today's historical 1m bars for {len(bars)} tokens.")
 
         if bars:
-            self.chart.load_historical_bars(bars, trading_dates=dates)
+            self.chart.load_historical_bars(bars)
 
         self._evaluate_radar_surges()
         self.last_poll_time = datetime.now() - timedelta(seconds=2)
@@ -330,17 +337,15 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         logger.info(f"Multi-day view toggled: {is_multiday} (retention: {DAYS_TO_KEEP} days)")
         self.chart.reset_chart_series()
         if is_multiday:
-            dates = self.db.fetch_distinct_trading_dates(limit=DAYS_TO_KEEP)
             bars = self.db.fetch_multi_day_1m_bars(days_to_keep=DAYS_TO_KEEP)
-            mode_lbl = f"past {len(dates)} days continuation"
+            mode_lbl = f"past {DAYS_TO_KEEP} days continuation"
         else:
-            dates = [datetime.now().strftime("%Y-%m-%d")]
             bars = self.db.fetch_today_1m_bars()
             mode_lbl = "today's intraday"
 
         if bars:
             logger.info(f"Loaded {mode_lbl} 1m bars for {len(bars)} tokens.")
-            self.chart.load_historical_bars(bars, trading_dates=dates)
+            self.chart.load_historical_bars(bars)
 
             # Replay any granular ticks logged since the newest bar time up to now
             try:
@@ -356,12 +361,48 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
                         t_pct = round(float(t["pct_change"]), 2)
                         t_ltp = round(float(t["ltp"]), 2)
                         t_time = t["tick_time"]
-                        self.chart.append_tick(t_tok, t_sym, t_time, t_pct, ltp=t_ltp)
+                        epoch = t_time.timestamp() if isinstance(t_time, datetime) else datetime.fromisoformat(str(t_time)).timestamp()
+                        self.chart.append_tick(t_tok, t_sym, epoch, t_pct, ltp=t_ltp)
             except Exception as replay_err:
                 logger.warning(f"Error replaying post-bar ticks during multi-day reload: {replay_err}")
 
         self.chart.auto_fit_view()
         self._evaluate_radar_surges()
+
+    def _update_db_badge(self, is_connected: bool, error_msg: str = "") -> None:
+        """Updates the top-bar database connection badge dynamically."""
+        if is_connected:
+            if self.is_remote_db:
+                text = f"🌐 SERVER: {self.db_host}  ● Online"
+                bg = "#1E3A8A"
+                border = "#3B82F6"
+                fg = "#93C5FD"
+            else:
+                text = "💻 DB: Localhost  ● Online"
+                bg = "#1F2937"
+                border = "#374151"
+                fg = "#10B981"
+            tip = f"Connected to MySQL on {self.db_host} (Status: Healthy)"
+        else:
+            text = f"🔴 DB: {self.db_host}  Offline"
+            bg = "#450A0A"
+            border = "#EF4444"
+            fg = "#FCA5A5"
+            tip = f"Connection error to {self.db_host}: {error_msg}. Retrying automatically..."
+
+        self.lbl_db_badge.setText(text)
+        self.lbl_db_badge.setToolTip(tip)
+        self.lbl_db_badge.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg};
+                color: {fg};
+                font-size: 10px;
+                font-weight: bold;
+                padding: 3px 8px;
+                border-radius: 4px;
+                border: 1px solid {border};
+            }}
+        """)
 
     # ==========================================================================
     # LIVE STREAMING TICKS POLLER (EVERY 500ms)
@@ -372,7 +413,14 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
         now_dt = datetime.now()
         self.lbl_clock.setText(f"TIME: {now_dt.strftime('%H:%M:%S')} | MARKET: 09:15 - 15:30")
 
-        ticks = self.db.fetch_latest_ticks_since(self.last_poll_time)
+        try:
+            ticks = self.db.fetch_latest_ticks_since(self.last_poll_time)
+            self._update_db_badge(is_connected=True)
+        except Exception as poll_err:
+            self._update_db_badge(is_connected=False, error_msg=str(poll_err))
+            logger.debug(f"Live tick poll connection blip: {poll_err}")
+            return
+
         if ticks:
             max_tick_time = self.last_poll_time
             for t in ticks:
@@ -381,12 +429,13 @@ class RelativeStrengthDashboard(QtWidgets.QMainWindow):
                 pct = round(float(t["pct_change"]), 2)
                 ltp = round(float(t["ltp"]), 2)
                 t_time = t["tick_time"]
+                epoch = t_time.timestamp() if isinstance(t_time, datetime) else datetime.fromisoformat(str(t_time)).timestamp()
 
                 if t_time > max_tick_time:
                     max_tick_time = t_time
 
-                # 1. Update Chart curve (continuous market session coordinate)
-                self.chart.append_tick(tok, sym, t_time, pct, ltp=ltp)
+                # 1. Update Chart curve
+                self.chart.append_tick(tok, sym, epoch, pct, ltp=ltp)
 
                 # 2. Update Heatmap tile (only when enabled by user to save background CPU)
                 if self.heatmap.is_engine_enabled:

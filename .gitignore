@@ -5,7 +5,10 @@ __pycache__/
 
 # Credentials & Private Settings (CRITICAL: DO NOT COMMIT REAL KEYS)
 credentials.json
+!credentials.example.json
 USER_CREDENTIALS.json
+connection_config.json
+!connection_config.example.json
 .env
 *.pem
 *.key

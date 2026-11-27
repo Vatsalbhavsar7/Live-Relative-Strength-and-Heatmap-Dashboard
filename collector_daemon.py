@@ -1,6 +1,6 @@
 """
-collector_daemon.py
--------------------
+projects/06_live_relative_strength_and_heatmap_dashboard/collector_daemon.py
+------------------------------------------------------------------------------
 Service 1: Standalone Background Ingestion Service:
 1. Connects to Angel One SmartStream WebSocket 2.0.
 2. Ingests live ticks for all active basket tokens (e.g. Nifty 50 constituents).
@@ -18,6 +18,11 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set
 
+try:
+    import _bootstrap_path
+except ImportError:
+    pass
+
 from basket_manager import BasketManager
 from config import (
     BAR_AGGREGATE_INTERVAL,
@@ -27,16 +32,29 @@ from config import (
     get_angelone_credentials,
 )
 from db_manager import DatabaseManager
-from core.angelone_auth import login
-from core.smartstream_ws import (
-    MODE_QUOTE,
-    close_ticker,
-    connect_ticker,
-    create_user_ticker,
-    subscribe_tokens,
-    unsubscribe_tokens,
-)
-from core.logger import get_logger
+
+try:
+    from core.angelone_auth import login
+    from core.smartstream_ws import (
+        MODE_QUOTE,
+        close_ticker,
+        connect_ticker,
+        create_user_ticker,
+        subscribe_tokens,
+        unsubscribe_tokens,
+    )
+    from core.logger import get_logger
+except ImportError:
+    from brokers.angelone.api import login
+    from brokers.angelone.websocket import (
+        MODE_QUOTE,
+        close_ticker,
+        connect_ticker,
+        create_user_ticker,
+        subscribe_tokens,
+        unsubscribe_tokens,
+    )
+    from utils.logger import get_logger
 
 logger = get_logger("relative_strength.collector")
 
@@ -111,10 +129,36 @@ class RelativeStrengthCollector:
         sys.stdout.flush()
 
     def stop(self) -> None:
-        """Cleanly stops workers and terminates WebSocket."""
+        """Cleanly stops workers, flushes remaining data, and terminates WebSocket."""
         logger.info("Stopping Relative Strength Collector Daemon...")
         self.running = False
 
+        # 1. Flush remaining 1-minute OHLC bars
+        try:
+            self._flush_completed_minute_bar()
+        except Exception as err:
+            logger.debug(f"Error flushing final minute bars: {err}")
+
+        # 2. Flush remaining micro-batch snapshots
+        try:
+            if self.live_state:
+                batch_rows = []
+                for s in list(self.live_state.values()):
+                    batch_rows.append((
+                        s["tick_time"].strftime("%Y-%m-%d %H:%M:%S"),
+                        s["token"],
+                        s["symbol"],
+                        s["ltp"],
+                        s["pct_change"],
+                        s["volume"],
+                    ))
+                if batch_rows:
+                    self.db.insert_tick_snapshots(batch_rows)
+                    logger.debug(f"Flushed final {len(batch_rows)} tick snapshots.")
+        except Exception as err:
+            logger.debug(f"Error flushing final tick snapshots: {err}")
+
+        # 3. Disconnect WebSocket
         if self.active_sws:
             try:
                 close_ticker(self.active_sws)
@@ -129,7 +173,7 @@ class RelativeStrengthCollector:
     # ==========================================================================
 
     def _authenticate(self) -> bool:
-        """Loads credentials and authenticates Angel One session."""
+        """Loads credentials from USER_CREDENTIALS.json and authenticates Angel One session."""
         creds = get_angelone_credentials()
         api_key = creds.get("api_key", "")
         client_code = creds.get("client_code", "")
@@ -137,7 +181,7 @@ class RelativeStrengthCollector:
         totp_secret = creds.get("totp_secret", "")
 
         if not api_key or not client_code:
-            logger.error("No active Angel One credentials found in credentials.json.")
+            logger.error("No active Angel One credentials found in USER_CREDENTIALS.json.")
             return False
 
         user_dict = {
@@ -149,7 +193,7 @@ class RelativeStrengthCollector:
             "totp_secret": totp_secret,
         }
 
-        logger.info(f"Authenticating collector daemon for Client [{client_code}]...")
+        logger.info(f"Authenticating collector daemon for Client [{client_code}] via USER_CREDENTIALS.json...")
         if login(user_dict):
             self.user = user_dict
             logger.info(f"Collector authenticated successfully as [{client_code}].")

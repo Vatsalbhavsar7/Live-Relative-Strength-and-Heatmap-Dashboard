@@ -16,6 +16,9 @@ from typing import Any, Dict, Optional
 
 PROJECT_DIR = Path(__file__).resolve().parent
 LOCAL_CREDENTIALS_FILE = PROJECT_DIR / "credentials.json"
+USER_CREDENTIALS_FILE = PROJECT_DIR / "USER_CREDENTIALS.json"
+CONNECTION_CONFIG_FILE = PROJECT_DIR / "connection_config.json"
+MARKET_CALENDAR_FILE = PROJECT_DIR / "market_calendar.json"
 
 
 def get_angelone_credentials(file_path: Optional[Path] = None) -> Dict[str, str]:
@@ -23,23 +26,24 @@ def get_angelone_credentials(file_path: Optional[Path] = None) -> Dict[str, str]
     Loads Angel One account credentials.
     Priority:
       1. Explicit `file_path`
-      2. Local `credentials.json` (git-ignored)
-      3. Environment variables (ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, etc.)
+      2. Local `credentials.json`
+      3. Local `USER_CREDENTIALS.json`
+      4. Environment variables (ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, etc.)
     """
-    # 1. Local credentials.json (git-ignored private file)
-    target = file_path or LOCAL_CREDENTIALS_FILE
-    if target.exists():
+    targets = [t for t in [file_path, LOCAL_CREDENTIALS_FILE, USER_CREDENTIALS_FILE] if t and t.exists()]
+    for target in targets:
         try:
             with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                c = data.get("angelone", data)
-                return {
-                    "api_key": str(c.get("api_key", "")).strip(),
-                    "client_code": str(c.get("client_code", "")).strip(),
-                    "password": str(c.get("password", c.get("pin", ""))).strip(),
-                    "totp_secret": str(c.get("totp_secret", "")).strip(),
-                }
+                c = data.get("angelone", data.get("credentials", data))
+                if "api_key" in c and "client_code" in c:
+                    return {
+                        "api_key": str(c.get("api_key", "")).strip(),
+                        "client_code": str(c.get("client_code", "")).strip(),
+                        "password": str(c.get("password", c.get("pin", ""))).strip(),
+                        "totp_secret": str(c.get("totp_secret", "")).strip(),
+                    }
             elif isinstance(data, list):
                 for item in data:
                     if str(item.get("broker_name", "")).lower() == "angelone" and item.get("is_active", True):
@@ -67,18 +71,94 @@ def get_angelone_credentials(file_path: Optional[Path] = None) -> Dict[str, str]
     return {"api_key": "", "client_code": "", "password": "", "totp_secret": ""}
 
 
-# ==============================================================================
-# 1. MYSQL DATABASE CONFIGURATION
-# ==============================================================================
-def _load_db_config() -> Dict[str, Any]:
-    cfg = {
-        "host": os.getenv("DB_HOST", "localhost"),
-        "port": int(os.getenv("DB_PORT", "3306")),
-        "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", ""),
-        "database": os.getenv("DB_NAME", "algo_relative_strength"),
+def get_host_ip_diagnostics() -> Dict[str, Any]:
+    """
+    Discovers local network interfaces and IPs for multi-device server setup.
+    Returns primary LAN IP, all local IPs, and Tailscale IP (if active).
+    """
+    import socket
+    import subprocess
+
+    lan_ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    all_ips = []
+    try:
+        hostname = socket.gethostname()
+        all_ips = socket.gethostbyname_ex(hostname)[2]
+    except Exception:
+        all_ips = [lan_ip]
+
+    tailscale_ip = None
+    for ip in all_ips:
+        if ip.startswith("100."):
+            tailscale_ip = ip
+            break
+
+    if not tailscale_ip:
+        try:
+            out = subprocess.check_output(["tailscale", "ip", "-4"], stderr=subprocess.DEVNULL, timeout=1.5)
+            ts = out.decode("utf-8").strip()
+            if ts and ts.startswith("100."):
+                tailscale_ip = ts
+        except Exception:
+            pass
+
+    return {
+        "primary_lan_ip": lan_ip,
+        "all_ips": all_ips,
+        "tailscale_ip": tailscale_ip,
     }
-    if LOCAL_CREDENTIALS_FILE.exists():
+
+
+# ==============================================================================
+# 1. MYSQL DATABASE CONFIGURATION (Supports Single & Multi-Device via Tailscale/LAN)
+# ==============================================================================
+def get_database_config() -> Dict[str, Any]:
+    """
+    Loads MySQL connection parameters.
+    Priority:
+      1. Local `connection_config.json` inside project folder (if present).
+      2. Local `credentials.json` with "mysql" block.
+      3. Environment variables (DB_HOST, DB_PORT, etc. or MYSQL_HOST).
+      4. Default fallback: localhost:3306.
+    """
+    cfg = {
+        "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "localhost")),
+        "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
+        "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "root")),
+        "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASSWORD", "Admin@123")),
+        "database": os.getenv("MYSQL_DATABASE", os.getenv("DB_NAME", "algo_relative_strength")),
+    }
+
+    # 1. Check connection_config.json
+    if CONNECTION_CONFIG_FILE.exists():
+        try:
+            with open(CONNECTION_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                m = data.get("mysql", data)
+                if "host" in m and m["host"]:
+                    cfg["host"] = str(m["host"]).strip()
+                if "port" in m and m["port"]:
+                    cfg["port"] = int(m["port"])
+                if "user" in m and m["user"]:
+                    cfg["user"] = str(m["user"]).strip()
+                if "password" in m and m["password"] is not None:
+                    cfg["password"] = str(m["password"]).strip()
+                if "database" in m and m["database"]:
+                    cfg["database"] = str(m["database"]).strip()
+        except Exception:
+            pass
+
+    # 2. Check credentials.json
+    elif LOCAL_CREDENTIALS_FILE.exists():
         try:
             with open(LOCAL_CREDENTIALS_FILE, "r", encoding="utf-8") as f:
                 d = json.load(f)
@@ -91,9 +171,11 @@ def _load_db_config() -> Dict[str, Any]:
                 cfg["database"] = m.get("database", cfg["database"])
         except Exception:
             pass
+
     return cfg
 
-_db_cfg = _load_db_config()
+_load_db_config = get_database_config
+_db_cfg = get_database_config()
 DB_HOST = _db_cfg["host"]
 DB_PORT = _db_cfg["port"]
 DB_USER = _db_cfg["user"]
