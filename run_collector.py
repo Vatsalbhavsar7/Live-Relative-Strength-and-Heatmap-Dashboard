@@ -32,11 +32,13 @@ except ImportError:
 
 from collector_daemon import RelativeStrengthCollector
 from config import (
+    BRIDGE_PORT,
     DAYS_TO_KEEP,
     get_angelone_credentials,
     get_host_ip_diagnostics,
 )
 from market_scheduler import MarketScheduler
+from tcp_bridge import start_tcp_bridge
 
 try:
     from core.logger import configure_logger, get_logger
@@ -89,24 +91,21 @@ def print_status_banner(scheduler: MarketScheduler) -> None:
         print(f"  Session Type       : {next_desc}")
         print(f"  Countdown to Start : {scheduler.format_countdown(time_to_next)}")
     print("-" * 78)
-    print("  HOST IP ADDRESSES FOR CLIENT DASHBOARD (connection_config.json):")
-    print(f"    • Office LAN IP    : {lan_ip}  (Use if Laptop and PC are on same office network)")
-    if ts_ip:
-        print(f"    • Tailscale Mesh IP: {ts_ip}  (Encrypted direct connection anywhere)")
-    else:
-        print("    • Tailscale Mesh IP: Not Detected (Optional: install Tailscale for remote access)")
-    if len(all_ips) > 1:
-        other_ips = [ip for ip in all_ips if ip != lan_ip and ip != ts_ip]
-        if other_ips:
-            print(f"    • Other Host IPs   : {', '.join(other_ips)}")
+    print("  ZERO-SUDO REMOTE ACCESS FOR CLIENT LAPTOP:")
+    print(f"    • Office LAN IP    : {lan_ip}")
+    print(f"    • Remote Bridge    : Port {BRIDGE_PORT} (Active - Zero sudo needed!)")
+    print("    • To connect from Windows Laptop:")
+    print("        In 'config.py' on your Windows Laptop, change only 2 lines:")
+    print(f"          DB_HOST = \"{lan_ip}\"")
+    print(f"          DB_PORT = {BRIDGE_PORT}")
+    print("        Then run 'python run_dashboard.py' on the laptop!")
     print("-" * 78)
     print("  ANGEL ONE ACCOUNT & STATIC IP STATUS:")
     if client_code:
-        print(f"    • Client Code / ID : {client_code} (Active in credentials.json / USER_CREDENTIALS.json)")
+        print(f"    • Client Code / ID : {client_code} (Active)")
     else:
         print("    • Client Code / ID : [!] NOT CONFIGURED!")
-        print("                         Please copy credentials.example.json -> credentials.json")
-        print("                         and set your Angel One api_key, client_code, password, totp_secret.")
+        print("                         Please set credentials in config.py or credentials.json")
     print("    • Static IP Note   : PC (LAN) and Laptop (Wi-Fi) share the same Office Router")
     print("                         outbound static IP. No changes needed in Angel One portal.")
     print("-" * 78)
@@ -241,6 +240,9 @@ def main():
     # Register OS signals for graceful shutdown
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
+
+    # Start Zero-Sudo TCP Bridge on port 3307 so remote client laptops can connect
+    start_tcp_bridge(listen_host="0.0.0.0", listen_port=BRIDGE_PORT, target_host="127.0.0.1", target_port=3306)
 
     if args.status:
         print_status_banner(scheduler)

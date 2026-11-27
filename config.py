@@ -20,16 +20,57 @@ USER_CREDENTIALS_FILE = PROJECT_DIR / "USER_CREDENTIALS.json"
 CONNECTION_CONFIG_FILE = PROJECT_DIR / "connection_config.json"
 MARKET_CALENDAR_FILE = PROJECT_DIR / "market_calendar.json"
 
+# ==============================================================================
+# USER CONFIGURATION (SINGLE-DEVICE vs TWO-DEVICE MODE)
+# ------------------------------------------------------------------------------
+# 1. ANGEL ONE CREDENTIALS:
+#    Needed ONLY on the device running 'run_collector.py'!
+#    (Leave empty if already saved in credentials.json or USER_CREDENTIALS.json)
+# ------------------------------------------------------------------------------
+ANGELONE_API_KEY = ""
+ANGELONE_CLIENT_CODE = ""
+ANGELONE_PASSWORD = ""
+ANGELONE_TOTP_SECRET = ""
+
+# ------------------------------------------------------------------------------
+# 2. DATABASE CONFIGURATION (MySQL):
+#
+# • SINGLE-DEVICE MODE (Default - Collector & Dashboard both on SAME machine):
+#     DB_HOST = "localhost"
+#     DB_PORT = 3306
+#
+# • TWO-DEVICE MODE (Linux PC collects data, Windows Laptop runs Dashboard):
+#     - On Linux PC (Server): Keep DB_HOST = "localhost", DB_PORT = 3306
+#     - On Windows Laptop (Client): Set DB_HOST = "192.168.2.130", DB_PORT = 3307
+# ------------------------------------------------------------------------------
+DB_HOST = "localhost"
+DB_PORT = 3306
+DB_USER = "root"
+DB_PASSWORD = "Admin@123"
+DB_NAME = "algo_relative_strength"
+
+# Remote bridge port (started automatically by run_collector.py without sudo)
+BRIDGE_PORT = 3307
+
 
 def get_angelone_credentials(file_path: Optional[Path] = None) -> Dict[str, str]:
     """
     Loads Angel One account credentials.
     Priority:
-      1. Explicit `file_path`
-      2. Local `credentials.json`
-      3. Local `USER_CREDENTIALS.json`
-      4. Environment variables (ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, etc.)
+      1. Direct variables in config.py (ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, etc.)
+      2. Explicit `file_path`
+      3. Local `credentials.json`
+      4. Local `USER_CREDENTIALS.json`
+      5. Environment variables (ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, etc.)
     """
+    if ANGELONE_API_KEY and ANGELONE_CLIENT_CODE:
+        return {
+            "api_key": ANGELONE_API_KEY.strip(),
+            "client_code": ANGELONE_CLIENT_CODE.strip(),
+            "password": ANGELONE_PASSWORD.strip(),
+            "totp_secret": ANGELONE_TOTP_SECRET.strip(),
+        }
+
     targets = [t for t in [file_path, LOCAL_CREDENTIALS_FILE, USER_CREDENTIALS_FILE] if t and t.exists()]
     for target in targets:
         try:
@@ -57,7 +98,7 @@ def get_angelone_credentials(file_path: Optional[Path] = None) -> Dict[str, str]
         except Exception:
             pass
 
-    # 2. Environment Variables
+    # Environment Variables
     env_key = os.getenv("ANGELONE_API_KEY")
     env_client = os.getenv("ANGELONE_CLIENT_CODE")
     if env_key and env_client:
@@ -126,15 +167,15 @@ def get_database_config() -> Dict[str, Any]:
     Priority:
       1. Local `connection_config.json` inside project folder (if present).
       2. Local `credentials.json` with "mysql" block.
-      3. Environment variables (DB_HOST, DB_PORT, etc. or MYSQL_HOST).
-      4. Default fallback: localhost:3306.
+      3. Variables in config.py (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME).
+      4. Environment variables (DB_HOST, DB_PORT, etc. or MYSQL_HOST).
     """
     cfg = {
-        "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "localhost")),
-        "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
-        "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "root")),
-        "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASSWORD", "Admin@123")),
-        "database": os.getenv("MYSQL_DATABASE", os.getenv("DB_NAME", "algo_relative_strength")),
+        "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", DB_HOST)),
+        "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", DB_PORT))),
+        "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", DB_USER)),
+        "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASSWORD", DB_PASSWORD)),
+        "database": os.getenv("MYSQL_DATABASE", os.getenv("DB_NAME", DB_NAME)),
     }
 
     # 1. Check connection_config.json
@@ -175,12 +216,6 @@ def get_database_config() -> Dict[str, Any]:
     return cfg
 
 _load_db_config = get_database_config
-_db_cfg = get_database_config()
-DB_HOST = _db_cfg["host"]
-DB_PORT = _db_cfg["port"]
-DB_USER = _db_cfg["user"]
-DB_PASSWORD = _db_cfg["password"]
-DB_NAME = _db_cfg["database"]
 
 DB_POOL_SIZE = 5
 DB_MAX_OVERFLOW = 10
